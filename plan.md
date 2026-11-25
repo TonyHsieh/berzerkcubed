@@ -175,6 +175,10 @@ herdr agent list
 herdr agent prompt engine-render "<PROMPT>" --wait
 ```
 
+> **Tip — Unblocking New Worktree Trust Prompts**: When starting agents in brand-new worktrees, `herdr agent list` may show `"agent_status": "blocked"` while the CLI asks to trust the folder. Always inspect with `herdr agent read <NAME>` before sending keys:
+> - **Claude Code (`--kind claude`)** defaults to `No, exit` — send `herdr agent send-keys <NAME> Down` then `Enter` (or focus the pane and select `Yes, I trust this folder`).
+> - **AntiGravity CLI (`--kind agy`)** — inspect with `herdr agent read <NAME>` first to verify which option is highlighted before sending keys.
+
 ### Software Factory Governance & Quality Gates
 All agents in `herdr` operate under the strict software-factory rules defined in [`AGENTS.md`](./AGENTS.md):
 1. **Tests Every Step**: Every feature step must ship with Vitest tests covering the new behavior.
