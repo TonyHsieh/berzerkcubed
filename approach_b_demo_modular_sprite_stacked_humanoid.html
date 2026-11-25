@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Modular Sprite-Stacked Humanoid Demo (Approach B)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=VT323&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none;
+        }
+        .retro-font {
+            font-family: 'VT323', monospace;
+        }
+        canvas#demo-canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            width: 100%;
+            height: 100%;
+            display: block;
+            cursor: crosshair;
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 flex flex-col h-screen select-none overflow-hidden">
+
+    <!-- Top Header -->
+    <header class="bg-gray-900 border-b border-gray-800 px-4 py-2.5 flex flex-wrap justify-between items-center gap-2">
+        <div class="flex items-center gap-2">
+            <span class="px-2 py-0.5 text-xs font-mono bg-teal-900/60 text-teal-300 border border-teal-700 rounded">APPROACH B DEMO</span>
+            <h1 class="text-lg font-bold text-white">Modular Multi-Part Sprite-Stacked Humanoid</h1>
+        </div>
+        <div class="flex items-center gap-4 text-xs font-mono text-gray-400">
+            <span>MOVE: <strong class="text-cyan-400">WASD / Arrows</strong></span>
+            <span>JUMP: <strong class="text-amber-400">SPACE</strong></span>
+            <span>AIM & SHOOT: <strong class="text-red-400">MOUSE / CLICK</strong></span>
+        </div>
+    </header>
+
+    <!-- Main Viewport -->
+    <main class="flex-grow flex flex-col lg:flex-row overflow-hidden p-2 gap-2">
+        
+        <!-- Left/Center: Interactive Canvas -->
+        <div id="canvas-wrapper" class="relative flex-grow bg-gray-900 rounded-lg border border-gray-800 overflow-hidden shadow-inner min-h-[300px]">
+            <canvas id="demo-canvas"></canvas>
+
+            <!-- Floating State Readout -->
+            <div class="absolute top-3 left-3 bg-gray-950/85 border border-gray-800 rounded p-2.5 font-mono text-xs space-y-1 pointer-events-none">
+                <div class="text-teal-400 font-bold border-b border-gray-800 pb-1 mb-1">RIG TELEMETRY</div>
+                <div>STATE: <span id="stat-state" class="text-green-400">STANDING</span></div>
+                <div>LEG ANGLE: <span id="stat-leg-angle" class="text-cyan-400">0°</span></div>
+                <div>TORSO AIM: <span id="stat-aim-angle" class="text-amber-400">0°</span></div>
+                <div>Z-ALTITUDE: <span id="stat-z" class="text-purple-400">0.0 px</span></div>
+            </div>
+
+            <!-- Mobile / Quick Touch Controls -->
+            <div class="absolute bottom-3 left-3 right-3 flex justify-between items-end lg:hidden pointer-events-none">
+                <div class="grid grid-cols-3 gap-1 pointer-events-auto">
+                    <div></div>
+                    <button id="btn-up" class="w-11 h-11 bg-gray-800/90 active:bg-teal-700 border border-gray-700 rounded text-white font-bold">W</button>
+                    <div></div>
+                    <button id="btn-left" class="w-11 h-11 bg-gray-800/90 active:bg-teal-700 border border-gray-700 rounded text-white font-bold">A</button>
+                    <button id="btn-down" class="w-11 h-11 bg-gray-800/90 active:bg-teal-700 border border-gray-700 rounded text-white font-bold">S</button>
+                    <button id="btn-right" class="w-11 h-11 bg-gray-800/90 active:bg-teal-700 border border-gray-700 rounded text-white font-bold">D</button>
+                </div>
+                <div class="flex gap-2 pointer-events-auto">
+                    <button id="btn-jump" class="px-4 h-11 bg-amber-600/90 active:bg-amber-500 border border-amber-400 rounded font-bold text-sm">JUMP</button>
+                    <button id="btn-fire" class="px-4 h-11 bg-red-600/90 active:bg-red-500 border border-red-400 rounded font-bold text-sm">FIRE</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Layer Inspector & Controls -->
+        <aside class="w-full lg:w-80 bg-gray-900 rounded-lg border border-gray-800 p-3 flex flex-col gap-3 overflow-y-auto">
+            <div>
+                <h2 class="text-sm font-bold text-teal-400 uppercase tracking-wider mb-1">How Approach B Works</h2>
+                <p class="text-xs text-gray-400 leading-relaxed">
+                    Instead of baking 340+ full-body slices, the trooper is split into <strong class="text-gray-200">3 independent voxel stacks</strong> rendered bottom-to-top:
+                </p>
+            </div>
+
+            <!-- Layer Breakdown Cards -->
+            <div class="space-y-2 text-xs">
+                <div class="bg-gray-950/90 p-2.5 rounded border border-gray-800">
+                    <div class="flex justify-between items-center font-bold text-cyan-400 mb-0.5">
+                        <span>1. Lower Rig (Legs & Pelvis)</span>
+                        <span class="font-mono text-[11px] bg-cyan-950 px-1.5 rounded">6 Layers</span>
+                    </div>
+                    <p class="text-gray-400">Rotates toward movement velocity. Cycles through 4 gait frames when running, or tucks knees when airborne.</p>
+                </div>
+
+                <div class="bg-gray-950/90 p-2.5 rounded border border-gray-800">
+                    <div class="flex justify-between items-center font-bold text-amber-400 mb-0.5">
+                        <span>2. Upper Rig (Torso & Helmet)</span>
+                        <span class="font-mono text-[11px] bg-amber-950 px-1.5 rounded">10 Layers</span>
+                    </div>
+                    <p class="text-gray-400">Mounted on top of the pelvis Z-height. Rotates <strong class="text-gray-200">360° independently</strong> toward the mouse cursor with subtle breathing/stride bob.</p>
+                </div>
+
+                <div class="bg-gray-950/90 p-2.5 rounded border border-gray-800">
+                    <div class="flex justify-between items-center font-bold text-red-400 mb-0.5">
+                        <span>3. Weapon Rig (Pulse Rifle)</span>
+                        <span class="font-mono text-[11px] bg-red-950 px-1.5 rounded">4 Layers</span>
+                    </div>
+                    <p class="text-gray-400">Parented to the torso's shoulder socket. Kicks backward along the aim vector during recoil without needing extra body slices.</p>
+                </div>
+            </div>
+
+            <!-- Interactive Render Tweaks -->
+            <div class="border-t border-gray-800 pt-2.5 space-y-2.5">
+                <h3 class="text-xs font-bold text-gray-300 uppercase tracking-wider">Live Stack Inspector</h3>
+                
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-400">Layer Z-Spacing (Exploded View)</span>
+                        <span id="val-spacing" class="font-mono text-teal-400">2.0px</span>
+                    </div>
+                    <input id="slider-spacing" type="range" min="1" max="8" step="0.5" value="2.0" class="w-full accent-teal-500">
+                </div>
+
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="text-gray-400">Camera / World Rotation</span>
+                        <span id="val-cam" class="font-mono text-teal-400">0°</span>
+                    </div>
+                    <input id="slider-cam" type="range" min="0" max="360" step="1" value="0" class="w-full accent-teal-500">
+                </div>
+
+                <div class="flex items-center justify-between pt-1">
+                    <label class="text-xs text-gray-300 flex items-center gap-2 cursor-pointer">
+                        <input id="chk-auto-demo" type="checkbox" class="accent-teal-500 rounded">
+                        <span>Auto-Demo AI Patrol</span>
+                    </label>
+                    <button id="btn-reset-targets" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 px-2.5 py-1 rounded border border-gray-700">
+                        Respawn Targets
+                    </button>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // ==========================================
+        // 1. AUDIO EFFECTS (Tone.js)
+        // ==========================================
+        let audioReady = false;
+        let shootSynth, jumpSynth, hitSynth, stepSynth;
+
+        function initAudio() {
+            if (audioReady || typeof Tone === 'undefined') return;
+            try {
+                shootSynth = new Tone.MembraneSynth({
+                    pitchDecay: 0.015,
+                    octaves: 4,
+                    envelope: { attack: 0.001, decay: 0.12, sustain: 0, release: 0.05 },
+                    volume: -10
+                }).toDestination();
+
+                jumpSynth = new Tone.Synth({
+                    oscillator: { type: 'triangle' },
+                    envelope: { attack: 0.01, decay: 0.15, sustain: 0, release: 0.1 },
+                    volume: -14
+                }).toDestination();
+
+                hitSynth = new Tone.NoiseSynth({
+                    noise: { type: 'white' },
+                    envelope: { attack: 0.005, decay: 0.08, sustain: 0 },
+                    volume: -12
+                }).toDestination();
+
+                stepSynth = new Tone.NoiseSynth({
+                    noise: { type: 'pink' },
+                    envelope: { attack: 0.002, decay: 0.025, sustain: 0 },
+                    volume: -24
+                }).toDestination();
+
+                audioReady = true;
+            } catch (e) {
+                console.warn('Audio init skipped:', e);
+            }
+        }
+
+        function triggerSound(type) {
+            if (!audioReady || Tone.context.state !== 'running') return;
+            try {
+                if (type === 'shoot') shootSynth.triggerAttackRelease('G2', '16n');
+                if (type === 'jump') jumpSynth.triggerAttackRelease('C4', '16n');
+                if (type === 'hit') hitSynth.triggerAttackRelease('16n');
+                if (type === 'step') stepSynth.triggerAttackRelease('32n');
+            } catch (e) {}
+        }
+
+        // ==========================================
+        // 2. PROCEDURAL MODULAR VOXEL SLICER
+        // ==========================================
+        // Builds separate slice arrays for:
+        // - Legs (Idle, Run Frame 0..3, Jump)
+        // - Torso + Helmet (10 layers)
+        // - Pulse Rifle (4 layers)
+        // - Stacked Crates & Target Dummies
+        const stacks = {
+            legsIdle: [],
+            legsRun: [[], [], [], []],
+            legsJump: [],
+            torso: [],
+            rifle: [],
+            crate: [],
+            dummy: []
+        };
+
+        function makeSlice(size, drawFn) {
+            const c = document.createElement('canvas');
+            c.width = size;
+            c.height = size;
+            const ctx = c.getContext('2d');
+            ctx.imageSmoothingEnabled = false;
+            drawFn(ctx, size);
+            return c;
+        }
+
+        function buildAllModularStacks() {
+            const S = 24; // 24x24 pixel grid per slice
+
+            // Helper to draw a pair of boots/legs at given forward/back offsets
+            // Note: Local sprite "UP" (0 deg) is forward!
+            function buildLegStack(leftOffsetY, rightOffsetY, tuckZ = 0) {
+                const layers = [];
+                for (let z = 0; z < 6; z++) {
+                    layers.push(makeSlice(S, (ctx, size) => {
+                        const cx = size / 2;
+                        const cy = size / 2;
+                        if (z < tuckZ) return; // Empty lower layers when jumping
+
+                        if (z === tuckZ) {
+                            // Armored Boots
+                            ctx.fillStyle = '#1e293b';
+                            ctx.fillRect(cx - 5, cy - 2 + leftOffsetY, 4, 5);
+                            ctx.fillRect(cx + 1, cy - 2 + rightOffsetY, 4, 5);
+                            // Boot toe highlights
+                            ctx.fillStyle = '#64748b';
+                            ctx.fillRect(cx - 5, cy - 3 + leftOffsetY, 4, 2);
+                            ctx.fillRect(cx + 1, cy - 3 + rightOffsetY, 4, 2);
+                        } else if (z >= tuckZ + 1 && z <= 3) {
+                            // Greaves / Thighs
+                            ctx.fillStyle = z === 2 ? '#0284c7' : '#0369a1';
+                            ctx.fillRect(cx - 5, cy - 2 + leftOffsetY * 0.7, 4, 4);
+                            ctx.fillRect(cx + 1, cy - 2 + rightOffsetY * 0.7, 4, 4);
+                        } else {
+                            // Pelvis & Utility Belt (joins both legs smoothly)
+                            ctx.fillStyle = '#334155';
+                            ctx.fillRect(cx - 5, cy - 3, 10, 6);
+                            ctx.fillStyle = '#eab308'; // Belt buckle
+                            ctx.fillRect(cx - 2, cy - 4, 4, 1);
+                        }
+                    }));
+                }
+                return layers;
+            }
+
+            // 1. Leg States
+            stacks.legsIdle = buildLegStack(0, 0, 0);
+            stacks.legsRun[0] = buildLegStack(-4, 4, 0);  // Left forward, right back
+            stacks.legsRun[1] = buildLegStack(-1, 1, 0);  // Passing
+            stacks.legsRun[2] = buildLegStack(4, -4, 0);  // Right forward, left back
+            stacks.legsRun[3] = buildLegStack(1, -1, 0);  // Passing
+            stacks.legsJump = buildLegStack(-2, 2, 1);    // Knees tucked up by 1 layer
+
+            // 2. Upper Rig: Armored Torso, Backpack & Visor Helmet (10 layers)
+            for (let z = 0; z < 10; z++) {
+                stacks.torso.push(makeSlice(S, (ctx, size) => {
+                    const cx = size / 2;
+                    const cy = size / 2;
+
+                    if (z >= 0 && z <= 4) {
+                        // Chestplate & Shoulder Pauldrons
+                        const width = z === 3 || z === 4 ? 14 : 11;
+                        ctx.fillStyle = z % 2 === 0 ? '#0284c7' : '#0ea5e9';
+                        ctx.fillRect(cx - width / 2, cy - 4, width, 7);
+
+                        // Chest armor highlight
+                        ctx.fillStyle = '#38bdf8';
+                        ctx.fillRect(cx - 4, cy - 5, 8, 2);
+
+                        // Jet/Power Backpack on the rear (+Y)
+                        ctx.fillStyle = '#475569';
+                        ctx.fillRect(cx - 4, cy + 3, 8, 4);
+                        ctx.fillStyle = '#22d3ee'; // Glowing power core
+                        ctx.fillRect(cx - 2, cy + 6, 4, 1);
+                    } else if (z === 5) {
+                        // Neck seal
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fillRect(cx - 3, cy - 3, 6, 6);
+                    } else if (z >= 6 && z <= 9) {
+                        // Space Marine Helmet
+                        const r = z === 9 ? 3 : 4;
+                        ctx.fillStyle = '#e2e8f0';
+                        ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+
+                        // Glowing Gold/Amber Visor on front (-Y)
+                        if (z === 7 || z === 8) {
+                            ctx.fillStyle = '#facc15';
+                            ctx.fillRect(cx - 3, cy - r - 1, 6, 2);
+                        }
+                    }
+                }));
+            }
+
+            // 3. Weapon Rig: Pulse Rifle (4 layers, offset to right shoulder)
+            for (let z = 0; z < 4; z++) {
+                stacks.rifle.push(makeSlice(S, (ctx, size) => {
+                    const cx = size / 2;
+                    const cy = size / 2;
+                    // Right arm holding rifle forward (-Y direction)
+                    if (z === 1 || z === 2) {
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fillRect(cx + 5, cy - 11, 3, 12);
+                        // Rifle barrel highlight
+                        ctx.fillStyle = '#94a3b8';
+                        ctx.fillRect(cx + 6, cy - 12, 1, 10);
+                        // Glowing plasma coil
+                        if (z === 2) {
+                            ctx.fillStyle = '#38bdf8';
+                            ctx.fillRect(cx + 6, cy - 8, 1, 4);
+                        }
+                    } else {
+                        ctx.fillStyle = '#334155';
+                        ctx.fillRect(cx + 5, cy - 8, 3, 7);
+                    }
+                }));
+            }
+
+            // 4. Environment Prop: Cargo Crate (8 layers)
+            for (let z = 0; z < 8; z++) {
+                stacks.crate.push(makeSlice(20, (ctx, size) => {
+                    const cx = size / 2;
+                    ctx.fillStyle = z === 0 || z === 7 ? '#334155' : '#475569';
+                    ctx.fillRect(cx - 7, cx - 7, 14, 14);
+                    if (z > 0 && z < 7) {
+                        ctx.fillStyle = '#d97706';
+                        ctx.fillRect(cx - 5, cx - 5, 10, 10);
+                    }
+                }));
+            }
+
+            // 5. Shooting Range Target Dummy (12 layers)
+            for (let z = 0; z < 12; z++) {
+                stacks.dummy.push(makeSlice(20, (ctx, size) => {
+                    const cx = size / 2;
+                    if (z < 2) {
+                        // Heavy base stand
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fillRect(cx - 6, cx - 6, 12, 12);
+                    } else if (z < 9) {
+                        // Torso target plate
+                        ctx.fillStyle = '#dc2626';
+                        ctx.fillRect(cx - 5, cx - 3, 10, 6);
+                        ctx.fillStyle = '#fef2f2';
+                        ctx.fillRect(cx - 2, cx - 3, 4, 1);
+                    } else {
+                        // Target head
+                        ctx.fillStyle = '#ef4444';
+                        ctx.fillRect(cx - 3, cx - 3, 6, 6);
+                    }
+                }));
+            }
+        }
+
+        // ==========================================
+        // 3. CHARACTER & SIMULATION STATE
+        // ==========================================
+        const state = {
+            player: {
+                x: 0,
+                y: 0,
+                z: 0,           // Jump altitude in world pixels
+                vz: 0,          // Vertical jump velocity
+                vx: 0,
+                vy: 0,
+                legAngle: 0,    // Degrees (direction of movement)
+                aimAngle: 0,    // Degrees (direction of cursor / torso)
+                runCycle: 0,    // Continuous animation phase
+                recoil: 0,      // Weapon kickback offset (0 to 1)
+                muzzleFlash: 0, // Frames remaining for muzzle flash
+                fireCooldown: 0,
+                isGrounded: true,
+                actionState: 'STANDING'
+            },
+            bullets: [],
+            particles: [],
+            crates: [
+                { x: -120, y: -90, angle: 15 },
+                { x: 130, y: -80, angle: -25 },
+                { x: -110, y: 100, angle: 45 }
+            ],
+            dummies: [],
+            keys: {},
+            mouse: { x: 0, y: 0, down: false },
+            layerSpacing: 2.0,
+            cameraAngle: 0,
+            autoDemo: false,
+            autoTimer: 0
+        };
+
+        function spawnDummies() {
+            state.dummies = [
+                { x: 140, y: 60, hp: 100, hitFlash: 0, angle: 225 },
+                { x: -150, y: 10, hp: 100, hitFlash: 0, angle: 90 },
+                { x: 30, y: -140, hp: 100, hitFlash: 0, angle: 180 }
+            ];
+        }
+
+        // ==========================================
+        // 4. INPUT HANDLING
+        // ==========================================
+        const canvas = document.getElementById('demo-canvas');
+        const wrapper = document.getElementById('canvas-wrapper');
+        const ctx = canvas.getContext('2d');
+
+        function resize() {
+            const rect = wrapper.getBoundingClientRect();
+            canvas.width = Math.max(300, Math.floor(rect.width));
+            canvas.height = Math.max(250, Math.floor(rect.height));
+            ctx.imageSmoothingEnabled = false;
+        }
+        window.addEventListener('resize', resize);
+
+        window.addEventListener('keydown', (e) => {
+            initAudio();
+            state.keys[e.code] = true;
+            if (e.code === 'Space') {
+                e.preventDefault();
+                tryJump();
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            state.keys[e.code] = false;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            state.mouse.x = e.clientX - rect.left;
+            state.mouse.y = e.clientY - rect.top;
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            initAudio();
+            state.mouse.down = true;
+            tryShoot();
+        });
+
+        window.addEventListener('mouseup', () => {
+            state.mouse.down = false;
+        });
+
+        // Touch controls support
+        function bindHoldButton(id, keyCode) {
+            const btn = document.getElementById(id);
+            if (!btn) return;
+            btn.addEventListener('touchstart', (e) => { e.preventDefault(); initAudio(); state.keys[keyCode] = true; });
+            btn.addEventListener('touchend', (e) => { e.preventDefault(); state.keys[keyCode] = false; });
+        }
+        bindHoldButton('btn-up', 'KeyW');
+        bindHoldButton('btn-down', 'KeyS');
+        bindHoldButton('btn-left', 'KeyA');
+        bindHoldButton('btn-right', 'KeyD');
+
+        document.getElementById('btn-jump').addEventListener('touchstart', (e) => { e.preventDefault(); initAudio(); tryJump(); });
+        document.getElementById('btn-fire').addEventListener('touchstart', (e) => { e.preventDefault(); initAudio(); tryShoot(); });
+
+        // Inspector sliders
+        document.getElementById('slider-spacing').addEventListener('input', (e) => {
+            state.layerSpacing = parseFloat(e.target.value);
+            document.getElementById('val-spacing').textContent = state.layerSpacing.toFixed(1) + 'px';
+        });
+
+        document.getElementById('slider-cam').addEventListener('input', (e) => {
+            state.cameraAngle = parseFloat(e.target.value);
+            document.getElementById('val-cam').textContent = state.cameraAngle + '°';
+        });
+
+        document.getElementById('chk-auto-demo').addEventListener('change', (e) => {
+            state.autoDemo = e.target.checked;
+        });
+
+        document.getElementById('btn-reset-targets').addEventListener('click', () => {
+            spawnDummies();
+        });
+
+        // ==========================================
+        // 5. PLAYER ACTIONS (JUMP, RUN, SHOOT)
+        // ==========================================
+        function tryJump() {
+            if (state.player.isGrounded) {
+                state.player.vz = 5.2;
+                state.player.isGrounded = false;
+                triggerSound('jump');
+            }
+        }
+
+        function tryShoot() {
+            const p = state.player;
+            if (p.fireCooldown > 0) return;
+
+            p.fireCooldown = 10; // Frames between shots
+            p.recoil = 1.0;
+            p.muzzleFlash = 3;
+            triggerSound('shoot');
+
+            // Compute world muzzle position from torso aim angle
+            const rad = (p.aimAngle * Math.PI) / 180;
+            const forwardX = Math.sin(rad);
+            const forwardY = -Math.cos(rad);
+            const rightX = Math.cos(rad);
+            const rightY = Math.sin(rad);
+
+            const muzzleX = p.x + forwardX * 22 + rightX * 10;
+            const muzzleY = p.y + forwardY * 22 + rightY * 10;
+
+            state.bullets.push({
+                x: muzzleX,
+                y: muzzleY,
+                z: p.z + 18, // Bullet travels at chest/rifle height
+                vx: forwardX * 11,
+                vy: forwardY * 11,
+                life: 45
+            });
+
+            // Eject brass shell casing particle
+            state.particles.push({
+                x: p.x + rightX * 10,
+                y: p.y + rightY * 10,
+                z: p.z + 18,
+                vx: rightX * (1.5 + Math.random()),
+                vy: rightY * (1.5 + Math.random()),
+                vz: 2.2,
+                color: '#facc15',
+                size: 2.5,
+                life: 30,
+                gravity: true
+            });
+        }
+
+        function lerpAngle(a, b, t) {
+            const diff = ((b - a + 540) % 360) - 180;
+            return (a + diff * t + 360) % 360;
+        }
+
+        // ==========================================
+        // 6. PHYSICS & ANIMATION UPDATE
+        // ==========================================
+        function updateSimulation() {
+            const p = state.player;
+
+            // Optional Auto-Demo mode so users can watch all 4 states hands-free
+            let moveX = 0;
+            let moveY = 0;
+
+            if (state.autoDemo) {
+                state.autoTimer += 0.03;
+                moveX = Math.cos(state.autoTimer * 0.8);
+                moveY = Math.sin(state.autoTimer * 0.8);
+                p.aimAngle = (state.autoTimer * 75) % 360;
+                if (Math.floor(state.autoTimer * 60) % 140 === 0) tryJump();
+                if (Math.floor(state.autoTimer * 60) % 22 === 0) tryShoot();
+            } else {
+                if (state.keys['KeyW'] || state.keys['ArrowUp']) moveY -= 1;
+                if (state.keys['KeyS'] || state.keys['ArrowDown']) moveY += 1;
+                if (state.keys['KeyA'] || state.keys['ArrowLeft']) moveX -= 1;
+                if (state.keys['KeyD'] || state.keys['ArrowRight']) moveX += 1;
+
+                // Rotate input vector by camera angle so WASD always matches screen orientation
+                if (moveX !== 0 || moveY !== 0) {
+                    const camRad = (-state.cameraAngle * Math.PI) / 180;
+                    const rx = moveX * Math.cos(camRad) - moveY * Math.sin(camRad);
+                    const ry = moveX * Math.sin(camRad) + moveY * Math.cos(camRad);
+                    moveX = rx;
+                    moveY = ry;
+                }
+
+                // Calculate Aim Angle from player screen center to mouse cursor
+                const cx = canvas.width / 2;
+                const cy = canvas.height / 2;
+                const screenDx = state.mouse.x - cx;
+                const screenDy = state.mouse.y - cy;
+                const screenAim = (Math.atan2(screenDx, -screenDy) * 180 / Math.PI + 360) % 360;
+                p.aimAngle = (screenAim - state.cameraAngle + 360) % 360;
+
+                if (state.mouse.down) tryShoot();
+            }
+
+            // Normalize movement & update velocity
+            const mag = Math.hypot(moveX, moveY);
+            const speed = 3.2;
+            if (mag > 0.01) {
+                p.vx = (moveX / mag) * speed;
+                p.vy = (moveY / mag) * speed;
+
+                // Smoothly rotate lower legs toward movement direction
+                const targetLegAngle = (Math.atan2(p.vx, -p.vy) * 180 / Math.PI + 360) % 360;
+                p.legAngle = lerpAngle(p.legAngle, targetLegAngle, 0.25);
+
+                // Advance running gait cycle
+                const prevStep = Math.floor(p.runCycle);
+                p.runCycle += 0.22;
+                const currStep = Math.floor(p.runCycle);
+                if (p.isGrounded && currStep !== prevStep && currStep % 2 === 0) {
+                    triggerSound('step');
+                    // Footstep dust puff
+                    state.particles.push({
+                        x: p.x + (Math.random() - 0.5) * 8,
+                        y: p.y + (Math.random() - 0.5) * 8,
+                        z: 1,
+                        vx: -p.vx * 0.2,
+                        vy: -p.vy * 0.2,
+                        vz: 0.4,
+                        color: '#64748b',
+                        size: 3,
+                        life: 16,
+                        gravity: false
+                    });
+                }
+            } else {
+                p.vx *= 0.75;
+                p.vy *= 0.75;
+                if (Math.hypot(p.vx, p.vy) < 0.1) {
+                    p.vx = 0;
+                    p.vy = 0;
+                }
+            }
+
+            // Apply horizontal movement & arena bounds
+            p.x = Math.max(-220, Math.min(220, p.x + p.vx));
+            p.y = Math.max(-170, Math.min(170, p.y + p.vy));
+
+            // Apply Jump Z-axis gravity
+            if (!p.isGrounded || p.z > 0 || p.vz > 0) {
+                p.z += p.vz;
+                p.vz -= 0.32; // Gravity
+                if (p.z <= 0) {
+                    p.z = 0;
+                    p.vz = 0;
+                    p.isGrounded = true;
+                    triggerSound('step');
+                }
+            }
+
+            // Weapon cooldown & recoil recovery
+            if (p.fireCooldown > 0) p.fireCooldown--;
+            if (p.muzzleFlash > 0) p.muzzleFlash--;
+            p.recoil *= 0.75;
+
+            // Determine human-readable animation state
+            if (!p.isGrounded) {
+                p.actionState = p.fireCooldown > 4 ? 'JUMP + SHOOT' : 'JUMPING';
+            } else if (Math.hypot(p.vx, p.vy) > 0.4) {
+                p.actionState = p.fireCooldown > 4 ? 'RUN + SHOOT' : 'RUNNING';
+            } else {
+                p.actionState = p.fireCooldown > 4 ? 'STAND + SHOOT' : 'STANDING';
+            }
+
+            // Update Bullets
+            state.bullets = state.bullets.filter(b => {
+                b.x += b.vx;
+                b.y += b.vy;
+                b.life--;
+
+                // Check collision with Target Dummies
+                for (let d of state.dummies) {
+                    if (d.hp > 0 && Math.hypot(b.x - d.x, b.y - d.y) < 16) {
+                        d.hp = Math.max(0, d.hp - 25);
+                        d.hitFlash = 5;
+                        triggerSound('hit');
+
+                        // Sparks on impact
+                        for (let i = 0; i < 6; i++) {
+                            state.particles.push({
+                                x: b.x,
+                                y: b.y,
+                                z: b.z,
+                                vx: (Math.random() - 0.5) * 4,
+                                vy: (Math.random() - 0.5) * 4,
+                                vz: Math.random() * 2.5,
+                                color: '#fb923c',
+                                size: 3,
+                                life: 18,
+                                gravity: true
+                            });
+                        }
+                        return false;
+                    }
+                }
+                return b.life > 0;
+            });
+
+            // Update Particles
+            state.particles = state.particles.filter(pt => {
+                pt.x += pt.vx;
+                pt.y += pt.vy;
+                pt.z += pt.vz;
+                if (pt.gravity) {
+                    pt.vz -= 0.2;
+                    if (pt.z < 0) {
+                        pt.z = 0;
+                        pt.vz *= -0.4;
+                    }
+                }
+                pt.life--;
+                return pt.life > 0;
+            });
+
+            state.dummies.forEach(d => {
+                if (d.hitFlash > 0) d.hitFlash--;
+            });
+
+            // Update Telemetry UI
+            document.getElementById('stat-state').textContent = p.actionState;
+            document.getElementById('stat-leg-angle').textContent = Math.round(p.legAngle) + '°';
+            document.getElementById('stat-aim-angle').textContent = Math.round(p.aimAngle) + '°';
+            document.getElementById('stat-z').textContent = p.z.toFixed(1) + ' px';
+        }
+
+        // ==========================================
+        // 7. MODULAR SPRITE STACK RENDERER
+        // ==========================================
+        // Transforms world (x, y) into screen coordinates taking camera rotation into account
+        function worldToScreen(wx, wy) {
+            const camRad = (state.cameraAngle * Math.PI) / 180;
+            const rx = wx * Math.cos(camRad) - wy * Math.sin(camRad);
+            const ry = wx * Math.sin(camRad) + wy * Math.cos(camRad);
+            return {
+                x: canvas.width / 2 + rx,
+                y: canvas.height / 2 + ry
+            };
+        }
+
+        // Draws a slice stack starting at a given base Z elevation
+        function drawStack(sliceArray, screenX, screenY, worldAngleDeg, scale, startZPx, spacingPx, localOffsetX = 0, localOffsetY = 0) {
+            const totalAngleRad = ((worldAngleDeg + state.cameraAngle) * Math.PI) / 180;
+
+            for (let z = 0; z < sliceArray.length; z++) {
+                const slice = sliceArray[z];
+                const yLift = startZPx + z * spacingPx;
+
+                ctx.save();
+                ctx.translate(screenX, screenY - yLift);
+                ctx.rotate(totalAngleRad);
+                ctx.scale(scale, scale);
+                ctx.drawImage(slice, -slice.width / 2 + localOffsetX, -slice.height / 2 + localOffsetY);
+                ctx.restore();
+            }
+        }
+
+        function renderFrame(now) {
+            updateSimulation();
+
+            const scale = 2.4;
+            const spacing = state.layerSpacing;
+
+            // 1. Clear Deck Floor
+            ctx.fillStyle = '#090d16';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 2. Draw Rotatable Starship Deck Grid
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+            ctx.rotate((state.cameraAngle * Math.PI) / 180);
+
+            const gridStep = 40;
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.12)';
+            ctx.lineWidth = 1;
+            for (let gx = -240; gx <= 240; gx += gridStep) {
+                ctx.beginPath();
+                ctx.moveTo(gx, -200);
+                ctx.lineTo(gx, 200);
+                ctx.stroke();
+            }
+            for (let gy = -200; gy <= 200; gy += gridStep) {
+                ctx.beginPath();
+                ctx.moveTo(-240, gy);
+                ctx.lineTo(240, gy);
+                ctx.stroke();
+            }
+
+            // Deck hazard border
+            ctx.strokeStyle = 'rgba(245, 158, 11, 0.35)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(-235, -185, 470, 370);
+            ctx.restore();
+
+            // 3. Collect all depth-sorted renderables by screen Y
+            const renderQueue = [];
+
+            // Cargo Crates
+            state.crates.forEach(c => {
+                const pos = worldToScreen(c.x, c.y);
+                renderQueue.push({
+                    sortY: pos.y,
+                    draw: () => {
+                        // Ground shadow
+                        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+                        ctx.beginPath();
+                        ctx.ellipse(pos.x, pos.y + 4, 18, 12, 0, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        drawStack(stacks.crate, pos.x, pos.y, c.angle, scale, 0, spacing);
+                    }
+                });
+            });
+
+            // Target Dummies
+            state.dummies.forEach(d => {
+                if (d.hp <= 0) return;
+                const pos = worldToScreen(d.x, d.y);
+                renderQueue.push({
+                    sortY: pos.y,
+                    draw: () => {
+                        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+                        ctx.beginPath();
+                        ctx.ellipse(pos.x, pos.y + 4, 16, 10, 0, 0, Math.PI * 2);
+                        ctx.fill();
+
+                        drawStack(stacks.dummy, pos.x, pos.y, d.angle, scale, 0, spacing);
+
+                        // HP bar above dummy
+                        const topY = pos.y - (stacks.dummy.length * spacing) - 16;
+                        ctx.fillStyle = '#1f2937';
+                        ctx.fillRect(pos.x - 16, topY, 32, 4);
+                        ctx.fillStyle = d.hitFlash > 0 ? '#ffffff' : '#ef4444';
+                        ctx.fillRect(pos.x - 16, topY, 32 * (d.hp / 100), 4);
+                    }
+                });
+            });
+
+            // Modular Player Trooper
+            const p = state.player;
+            const pPos = worldToScreen(p.x, p.y);
+            renderQueue.push({
+                sortY: pPos.y,
+                draw: () => {
+                    // Ground Shadow (shrinks slightly as jump altitude Z increases!)
+                    const shadowScale = Math.max(0.45, 1 - p.z / 90);
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+                    ctx.beginPath();
+                    ctx.ellipse(pPos.x, pPos.y + 4, 16 * shadowScale, 10 * shadowScale, 0, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // Subtle movement direction arrow on floor
+                    const legRad = ((p.legAngle + state.cameraAngle) * Math.PI) / 180;
+                    ctx.strokeStyle = 'rgba(34, 211, 238, 0.35)';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(pPos.x, pPos.y);
+                    ctx.lineTo(pPos.x + Math.sin(legRad) * 24, pPos.y - Math.cos(legRad) * 24);
+                    ctx.stroke();
+
+                    // Select appropriate Leg Stack frame
+                    let activeLegStack = stacks.legsIdle;
+                    if (!p.isGrounded) {
+                        activeLegStack = stacks.legsJump;
+                    } else if (Math.hypot(p.vx, p.vy) > 0.4) {
+                        const frameIdx = Math.floor(p.runCycle) % 4;
+                        activeLegStack = stacks.legsRun[frameIdx];
+                    }
+
+                    // Subtle vertical stride bob when running
+                    const strideBob = (p.isGrounded && Math.hypot(p.vx, p.vy) > 0.4)
+                        ? Math.abs(Math.sin(p.runCycle * Math.PI)) * 2.5
+                        : Math.sin(now / 300) * 0.8;
+
+                    const baseZ = p.z;
+                    const legHeightPx = activeLegStack.length * spacing;
+
+                    // PART 1: Draw Lower Legs Stack (oriented to movement angle)
+                    drawStack(activeLegStack, pPos.x, pPos.y, p.legAngle, scale, baseZ, spacing);
+
+                    // PART 2 & 3: Z-Interleaved Upper Torso & Pulse Rifle Rendering
+                    // Because the rifle extends out from the right shoulder, its screen-Y depth
+                    // relative to the torso changes as the character rotates 360°.
+                    // Drawing slice-by-slice on each Z-plane ensures the rifle tucks behind
+                    // the torso when aimed away from the camera (~240° to 341°).
+                    const torsoStartZ = baseZ + legHeightPx + strideBob;
+                    const rifleStartLayer = 1; // Rifle is mounted at shoulder height (layer 1..4 of torso)
+                    const recoilOffset = p.recoil * 3.5; // Kicks backward in local +Y
+
+                    // Calculate screen-Y depth of the rifle's center relative to the torso's center
+                    const totalAimRad = ((p.aimAngle + state.cameraAngle) * Math.PI) / 180;
+                    // Rifle center in local sprite space is (+6 right, -5 forward)
+                    const rifleLocalX = 6;
+                    const rifleLocalY = -5 + recoilOffset;
+                    const rifleScreenRelY = rifleLocalX * Math.sin(totalAimRad) + rifleLocalY * Math.cos(totalAimRad);
+                    const rifleBehindTorso = rifleScreenRelY < 0;
+
+                    for (let z = 0; z < stacks.torso.length; z++) {
+                        const layerZ = torsoStartZ + z * spacing;
+                        const rifleIdx = z - rifleStartLayer;
+                        const hasRifleSlice = rifleIdx >= 0 && rifleIdx < stacks.rifle.length;
+
+                        const drawTorsoSlice = () => {
+                            ctx.save();
+                            ctx.translate(pPos.x, pPos.y - layerZ);
+                            ctx.rotate(totalAimRad);
+                            ctx.scale(scale, scale);
+                            ctx.drawImage(stacks.torso[z], -stacks.torso[z].width / 2, -stacks.torso[z].height / 2);
+                            ctx.restore();
+                        };
+
+                        const drawRifleSlice = () => {
+                            if (!hasRifleSlice) return;
+                            ctx.save();
+                            ctx.translate(pPos.x, pPos.y - layerZ);
+                            ctx.rotate(totalAimRad);
+                            ctx.scale(scale, scale);
+                            ctx.drawImage(stacks.rifle[rifleIdx], -stacks.rifle[rifleIdx].width / 2, -stacks.rifle[rifleIdx].height / 2 + recoilOffset);
+                            ctx.restore();
+                        };
+
+                        if (rifleBehindTorso) {
+                            drawRifleSlice();
+                            drawTorsoSlice();
+                        } else {
+                            drawTorsoSlice();
+                            drawRifleSlice();
+                        }
+                    }
+
+                    // Muzzle Flash at rifle tip
+                    if (p.muzzleFlash > 0) {
+                        const aimRad = ((p.aimAngle + state.cameraAngle) * Math.PI) / 180;
+                        const mx = pPos.x + Math.sin(aimRad) * 30 + Math.cos(aimRad) * 14;
+                        const my = pPos.y - (torsoStartZ + 2.5 * spacing) - Math.cos(aimRad) * 30 + Math.sin(aimRad) * 14;
+                        ctx.fillStyle = p.muzzleFlash === 3 ? '#ffffff' : '#facc15';
+                        ctx.beginPath();
+                        ctx.arc(mx, my, 5 + p.muzzleFlash * 1.5, 0, Math.PI * 2);
+                        ctx.fill();
+                    }
+                }
+            });
+
+            // Sort all entities back-to-front by screen Y
+            renderQueue.sort((a, b) => a.sortY - b.sortY);
+            renderQueue.forEach(item => item.draw());
+
+            // 4. Draw Active Bullets (Elevated at rifle Z-height)
+            state.bullets.forEach(b => {
+                const bPos = worldToScreen(b.x, b.y);
+                const liftY = b.z * (spacing / 2.0);
+                ctx.fillStyle = '#38bdf8';
+                ctx.beginPath();
+                ctx.arc(bPos.x, bPos.y - liftY, 3.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(bPos.x - 1, bPos.y - liftY - 1, 2, 2);
+            });
+
+            // 5. Draw Particles (Dust puffs, shell casings, impact sparks)
+            state.particles.forEach(pt => {
+                const ptPos = worldToScreen(pt.x, pt.y);
+                const liftY = pt.z * (spacing / 2.0);
+                ctx.fillStyle = pt.color;
+                ctx.globalAlpha = Math.min(1, pt.life / 12);
+                ctx.fillRect(ptPos.x - pt.size / 2, ptPos.y - liftY - pt.size / 2, pt.size, pt.size);
+                ctx.globalAlpha = 1.0;
+            });
+
+            requestAnimationFrame(renderFrame);
+        }
+
+        // ==========================================
+        // 8. BOOTSTRAP & INITIALIZATION
+        // ==========================================
+        buildAllModularStacks();
+        spawnDummies();
+        resize();
+        requestAnimationFrame(renderFrame);
+    </script>
+</body>
+</html>
