@@ -159,14 +159,20 @@ git init
 git add .
 git commit -m "chore: milestone 0 scaffold, contracts, and AGENTS.md"
 
-# 2. Create 3 isolated worktrees in herdr
-herdr worktree create feat/engine-render
-herdr worktree create feat/world-player
-herdr worktree create feat/enemies-bosses
+# 2. Create 3 isolated worktrees in herdr (each returns its new workspace/pane ID in JSON)
+herdr worktree create --branch feat/engine-render --base main --label "engine-render"
+herdr worktree create --branch feat/world-player --base main --label "world-player"
+herdr worktree create --branch feat/enemies-bosses --base main --label "enemies-bosses"
 
-# 3. Start agents inside each worktree pane (e.g. claude or agy)
-herdr agent start claude
+# 3. Inspect pane IDs and start an agent (claude or agy) in each worktree pane
+herdr pane list
+herdr agent start engine-render --kind claude --pane <PANE_ID_1>
+herdr agent start world-player --kind agy --pane <PANE_ID_2>
+herdr agent start enemies-bosses --kind claude --pane <PANE_ID_3>
 herdr agent list
+
+# 4. Send a prompt to a named agent and wait for completion
+herdr agent prompt engine-render "<PROMPT>" --wait
 ```
 
 ### Software Factory Governance & Quality Gates
