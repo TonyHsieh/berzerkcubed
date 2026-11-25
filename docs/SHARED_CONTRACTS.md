@@ -29,14 +29,15 @@ All parallel `herdr` worktrees import types from `src/engine/types.ts` and imple
 
 ### `src/render/vfx.ts`
 - `class VfxSystem`:
-  - Pooled voxel debris, explosions, lightning arcs, freeze crystals, muzzle flashes, dodge afterimages, optional CRT scanline overlay.
+  - Pooled voxel debris, explosions, lightning arcs, freeze crystals, muzzle flashes, dodge afterimages, optional CRT scanline overlay (`renderCrt`).
   - `handleEvent(event: GameEvent): void`
   - `update(dt: number): void`
-  - `render(ctx, worldToScreen, camera): void`
+  - `render(ctx, worldToScreen: WorldToScreenFn, camera): void` (where `WorldToScreenFn = (wx: number, wy: number) => Vec2`, bound to `worldToScreen(x, y, camera, viewW, viewH)` during integration).
 
 ### `src/audio/soundEngine.ts` & `src/audio/voiceTaunts.ts`
-- `SoundEngine`: Tone.js procedural arcade SFX (`shoot`, `dodge`, `hit`, `explosion`, `shield_break`, `door_hum`, `blade_whirr`, `slam_impact`, `electric_zap`) + toggleable bassline.
-- `VoiceTauntEngine`: Variable-pitch robotic speech taunts (`speak(text, pitch, rate, speaker)`) using Web Speech API / Tone.js fallback with distinct presets for Enforcers, Maximilian, Recogniser, and Evil Otto.
+- `SoundEngine`: Tone.js procedural arcade SFX (`shoot`, `dodge`, `hit`, `explosion`, `shield_break`, `door_hum`, `blade_whirr`, `slam_impact`, `electric_zap`) + toggleable bassline. Call `await soundEngine.init()` on the first user gesture before playing.
+- `VoiceTauntEngine`: Variable-pitch robotic speech taunts (`speak(text, pitch, rate, speaker)`) using Web Speech API / Tone.js fallback with distinct presets for Enforcers, Maximilian, Recogniser, and Evil Otto. Call `await voiceTaunts.init()` on the first user gesture.
+- Swarm sprite cache keys use `"<kind>#<frame>"` via `enemyCacheKey(kind, frame)` (Enforcer: 3 frames, shooter/grenadier: 2 frames; crates: `"crate"`).
 
 ---
 
