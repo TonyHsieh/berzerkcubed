@@ -34,3 +34,30 @@ If your worktree needs a new field in `src/engine/types.ts`, a new `GameEvent` v
 - **Question / Request**: (1) `SpriteStackCache.bake` takes one stack, so animation frames are baked under separate keys `"<kind>#<frame>"`; Enforcer has 3 frames, shooter/grenadier 2. (2) `CircuitBackground.render` treats `camera.x/y` as world position and rotates by `camera.angleDeg` about screen center. (3) Extra non-contract APIs: `VfxSystem.renderCrt`, `SoundEngine.init()` / `VoiceTauntEngine.init()` (async, user-gesture) must be called before audio plays.
 - **Proposed Contract Change**: Add the above to `docs/SHARED_CONTRACTS.md`.
 - **Judge Resolution**: Approved & synced to `docs/SHARED_CONTRACTS.md`.
+
+## [RESOLVED] Milestone 3 — Evil Otto linger timer start condition
+- **From**: `orchestrator` (Milestone 3 integration, flagged by verifier `t_47f758eb`)
+- **Gap in Spec**: `plan.md` / `docs/specs/milestone-3-integration.md` do not say when the Evil Otto linger timer (`ottoWarningSec`) starts.
+- **Options & Tradeoffs**:
+  1. Start only after the sector boss is defeated (implemented) — boss fight is never interrupted by Otto.
+  2. Start at sector entry — harsher time pressure; Otto can overlap the boss fight.
+- **Escalation Channel**: Kanban `t_47f758eb` (human comment 2026-11-25)
+- **Human Decision**: APPROVED — Option 1. Timer starts only after boss defeat (`src/game/gameState.ts`, step 8).
+
+## [RESOLVED] Milestone 3 — Sector advance via manual NEXT SECTOR button
+- **From**: `orchestrator` (Milestone 3 integration, flagged by verifier `t_47f758eb`)
+- **Gap in Spec**: How the player moves to the next sector after the boss is defeated.
+- **Options & Tradeoffs**:
+  1. Manual `NEXT SECTOR` HUD button (implemented) — player may linger (risking Evil Otto) for pickups/score.
+  2. Automatic advance / exit door after a delay.
+- **Escalation Channel**: Kanban `t_47f758eb` (human comment 2026-11-25)
+- **Human Decision**: APPROVED — Option 1. Manual `NEXT SECTOR` button.
+
+## [RESOLVED] Milestone 3 — Sector 3+ boss rotation and scaling
+- **From**: `orchestrator` (Milestone 3 integration, flagged by verifier `t_47f758eb`)
+- **Gap in Spec**: Boss selection and difficulty for sectors after Sector 2.
+- **Options & Tradeoffs**:
+  1. Alternate Maximilian / Recogniser with +25% boss HP per sector (implemented).
+  2. A different rotation or scaling curve.
+- **Escalation Channel**: Kanban `t_47f758eb` (human comment 2026-11-25)
+- **Human Decision**: APPROVED — Option 1. Sector 3+ alternates bosses with +25% HP per sector.

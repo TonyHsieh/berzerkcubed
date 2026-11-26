@@ -69,3 +69,21 @@ Every agent appends a short entry here when completing a milestone, feature, or 
 - **Verification & Regression Proof**:
   - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 errors).
   - `pnpm test` (`vitest run`): **PASSED** — **3 test files, 18/18 tests passed** (`difficulty.test.ts`: 2, `enemies.test.ts`: 8, `bosses.test.ts`: 8).
+
+---
+
+## Milestone 3 — Judge / Orchestrator (`main`) — Full Integration, Renderer, HUD & Tuning
+- **Files created/modified**:
+  - `src/game/gameState.ts` — `FIXED_DT`, `GameState`, `createGameState`, `createGameStateForSector`, `stepGameState`, `spawnBoss`, `advanceToNextSector` (pure headless 60 Hz simulation orchestrating `worldSim`, `SpatialGrid`, `player`, `orbitals`, `enforcer`, `shooter`, `spawner`, `maximilian`, `recogniser`/`damageBossPart`, `evilOtto`, projectile physics & collisions, pickup collection, wave/sector progression, and Evil Otto lingering trigger).
+  - `src/game/renderer.ts` — `createRenderer`, `GameRenderer`, `RendererOptions` (initializes `buildAllModels()` and `bakeSwarmCaches`, renders `CircuitBackground`, camera-rotated floating platform island/doors/bridges/electrified walls/warning rings, Y-depth-sorted renderQueue with cached swarm enemies, Z-interleaved Hero + orbitals, multi-part bosses, projectiles, pickups, `VfxSystem.render` + `renderCrt`, and routes all `GameEvent`s to VFX, `SoundEngine`, `VoiceTauntEngine`, and `triggerCameraShake`).
+  - `src/game/hud.ts` — `createHud`, `HudController`, `HudCallbacks` (headless-safe neon cyber-arcade HUD mounted in `#hud-root` with HP/Shield/Lives/Dodge indicators, weapon/level/modifiers/orbitals, sector/score/hostiles, Boss HP & Recogniser multi-part status, and collapsible `Tab`-toggleable Designer Tuning Panel with live sliders for `maxMeleeEnforcers` & `maxShootersAndGrenadiers`, CRT/audio/bass toggles, and quick boss-spawn buttons).
+  - `src/main.ts` — wired `createInputController`, fixed-timestep 60 Hz accumulator loop (`requestAnimationFrame`), user-gesture audio initialization (`initAudio()`), viewport resize handling, renderer, and HUD.
+  - `src/game/gameState.test.ts` — 5 headless Vitest integration tests (300-unit swarm stress loop with 225 Enforcers + 50 Shooters + 25 Grenadiers, crate -> power-up -> weapon level/combine flow, Recogniser leg destruction unlocking head damage inside `stepGameState`, Evil Otto trigger after `ottoWarningSec` emitting `voice_taunt`, and player dodge-roll i-frames + shield-first damage).
+- **Documented Defaults (for human review)**:
+  - Sector progression uses 0-based `sectorIndex` (displayed as `SECTOR N+1` in HUD): Sector 1 (`0`) spawns Maximilian on a perimeter-walled island, Sector 2 (`1`) spawns Recogniser on an open-edge island, and Sector 3+ (`2+`) alternates bosses with +25% HP scaling per sector. After defeating the sector boss, a `NEXT SECTOR` HUD button appears so the player can advance or linger to trigger Evil Otto past `ottoWarningSec`.
+- **Verification & Regression Proof**:
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 994 modules transformed, built in 1.78s).
+  - `pnpm test` (`vitest run`): **PASSED** — **11 test files passed (11), 61 tests passed (61)** (all 56 prior tests + 5 new Milestone 3 integration tests).
+- **Verifier follow-up (`t_47f758eb`, per human decision 2026-11-25)**:
+  - Recorded the three Milestone 3 design defaults (Otto timer after boss defeat, manual `NEXT SECTOR` button, Sector 3+ alternating bosses +25% HP) as human-approved `[RESOLVED]` entries in `docs/QUESTIONS.md`.
+  - Restored `approach_b_demo_modular_sprite_stacked_humanoid.html` to the repo root (it had been moved to `docs/` without a log entry, breaking links in `AGENTS.md` and `plan.md`). Content is byte-identical to `HEAD`.
