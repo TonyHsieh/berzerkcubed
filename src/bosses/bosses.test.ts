@@ -5,6 +5,14 @@ import type {
   PlayerState,
   Projectile,
 } from '../engine/types';
+import { createAbb, updateAbb } from './abb';
+import { applyHigherSectorBossScaling } from './bossUtils';
+import { createBrainbot, updateBrainbot } from './brainbot';
+import {
+  createBugHive,
+  interceptProjectileWithOrbitingBugs,
+  updateBugHive,
+} from './bugHive';
 import { createEvilOtto, updateEvilOtto } from './evilOtto';
 import { createMaximilian, isMaximilianVulnerable, updateMaximilian } from './maximilian';
 import {
@@ -12,6 +20,7 @@ import {
   damageBossPart,
   updateRecogniser,
 } from './recogniser';
+import { createSkullhead, updateSkullhead } from './skullhead';
 
 function makePlayer(x = 400, y = 400): PlayerState {
   return {
@@ -499,5 +508,135 @@ describe('Milestone 4.1 Fix 6 — Maximilian blade-shield & vulnerability', () =
     updateMaximilian(boss, player, island, [beam], 0.05, events);
     expect(beam.life).toBeGreaterThan(0);
     expect(boss.shieldHp).toBeLessThan(before);
+  });
+});
+
+describe('Milestone 4.11 — Boss Overhaul (2-Leg Recogniser, Multi-Layer Shields, Rampage)', () => {
+  it('builds a 2-legged larger Recogniser with distinct left_leg and right_leg geometry', () => {
+    const rec = createRecogniser(500, 500);
+    const left = rec.parts.find((p) => p.id === 'left_leg')!;
+    const right = rec.parts.find((p) => p.id === 'right_leg')!;
+    expect(rec.radius).toBeGreaterThanOrEqual(60);
+    expect(left.offsetX).toBeLessThan(-30);
+    expect(right.offsetX).toBeGreaterThan(30);
+  });
+
+  it('applies higher-sector HP scaling, regenerating multi-layer shields, and periodic rampage invulnerability', () => {
+    const rec = applyHigherSectorBossScaling(createRecogniser(500, 500), 2);
+    const base = createRecogniser(500, 500);
+    const player = makePlayer(700, 500);
+    const events: GameEvent[] = [];
+
+    expect(rec.maxHp).toBeGreaterThan(base.maxHp);
+    expect(rec.shieldLayers).toBeGreaterThanOrEqual(2);
+    expect(rec.maxShieldLayers).toBe(rec.shieldLayers);
+
+    // Damage hits the shield layer first before touching boss parts
+    const left = rec.parts.find((p) => p.id === 'left_leg')!;
+    const startLayers = rec.shieldLayers!;
+    const layerHp = rec.shieldLayerHp!;
+    damageBossPart(rec, rec.x + left.offsetX, rec.y + left.offsetY, layerHp + 10, events);
+    expect(rec.shieldLayers).toBe(startLayers - 1);
+    expect(left.hp).toBe(left.maxHp);
+
+    // Trigger rampage invulnerability and verify damage is blocked during rampage
+    rec.rampageCooldown = 0.05;
+    updateRecogniser(rec, player, 0.1, events);
+    expect(rec.rampageTimer).toBeGreaterThan(0);
+    const hpBefore = rec.hp;
+    const shieldBefore = rec.shieldHp;
+    expect(damageBossPart(rec, rec.x + left.offsetX, rec.y + left.offsetY, 100, events)).toBe(false);
+    expect(rec.hp).toBe(hpBefore);
+    expect(rec.shieldHp).toBe(shieldBefore);
+
+    // Advance past rampage duration -> returns to normal vulnerability
+    for (let i = 0; i < 40; i++) {
+      updateRecogniser(rec, player, 0.1, events);
+    }
+    expect(rec.rampageTimer).toBe(0);
+  });
+});
+
+describe('Milestone 4.11 — Four New Bosses (ABB, Skullhead, Bug Hive, Brainbot)', () => {
+  it('ABB performs dodge-dash repositioning then launches a 360-degree ring of homing missiles', () => {
+    const abb = createAbb(400, 400);
+    const player = makePlayer(700, 400);
+    const island = makeIsland({ crates: [] });
+    const events: GameEvent[] = [];
+    const seenPhases = new Set<string>([abb.phase]);
+    const missiles: Projectile[] = [];
+    let sawDash = false;
+
+    for (let i = 0; i < 60; i++) {
+      const fired = updateAbb(abb, player, island, 0.1, events);
+      missiles.push(...fired);
+      seenPhases.add(abb.phase);
+      if ((abb.dashTimer ?? 0) > 0) sawDash = true;
+    }
+
+    expect(seenPhases.has('dodge_dash')).toBe(true);
+    expect(seenPhases.has('missile_halt')).toBe(true);
+    expect(sawDash).toBe(true);
+    expect(missiles.filter((p) => p.kind === 'homing_drone').length).toBeGreaterThanOrEqual(8);
+  });
+
+  it('Skullhead telegraphs then fires twin sweeping eye-laser beams', () => {
+    const skull = createSkullhead(400, 400);
+    const player = makePlayer(720, 400);
+    const events: GameEvent[] = [];
+    const beams: Projectile[] = [];
+    let sawTelegraph = false;
+    let sawSweep = false;
+
+    for (let i = 0; i < 60; i++) {
+      beams.push(...updateSkullhead(skull, player, 0.1, events));
+      if ((skull.laserTelegraphTimer ?? 0) > 0) sawTelegraph = true;
+      if ((skull.laserActiveTimer ?? 0) > 0) sawSweep = true;
+    }
+
+    expect(sawTelegraph).toBe(true);
+    expect(sawSweep).toBe(true);
+    expect(beams.filter((p) => p.kind === 'beam_segment').length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('Bug Hive maintains orbiting Flying Bug Bots that intercept shots, swoop, and replenish', () => {
+    const hive = createBugHive(400, 400);
+    const player = makePlayer(650, 400);
+    const events: GameEvent[] = [];
+
+    expect(hive.orbitingBugs?.length).toBeGreaterThanOrEqual(6);
+
+    // Incoming shot hitting an orbiting bug is intercepted and destroys/damages the bug
+    const targetBug = hive.orbitingBugs![0];
+    const shot = makeTestProjectile('bug_shot', targetBug.x, targetBug.y, { damage: 60 });
+    const intercepted = interceptProjectileWithOrbitingBugs(hive, shot, events);
+    expect(intercepted).toBe(true);
+    expect(shot.life).toBe(0);
+    expect(hive.orbitingBugs!.length).toBe(5);
+
+    // Run through orbit_shield -> swoop_attack -> replenish
+    let sawSwoop = false;
+    for (let i = 0; i < 75; i++) {
+      updateBugHive(hive, player, 0.1, events);
+      if (hive.orbitingBugs?.some((b) => b.state === 'swoop')) sawSwoop = true;
+    }
+    expect(sawSwoop).toBe(true);
+    expect(hive.orbitingBugs!.length).toBeGreaterThan(5);
+  });
+
+  it('Brainbot rolls rapidly and fires ground-hugging crackling electricity waves', () => {
+    const brain = createBrainbot(400, 400);
+    const player = makePlayer(720, 400);
+    const island = makeIsland({ crates: [] });
+    const events: GameEvent[] = [];
+    const waves: Projectile[] = [];
+
+    for (let i = 0; i < 50; i++) {
+      waves.push(...updateBrainbot(brain, player, island, 0.1, events));
+    }
+
+    const elecWaves = waves.filter((p) => p.kind === 'electric_wave');
+    expect(elecWaves.length).toBeGreaterThanOrEqual(5);
+    expect(elecWaves.every((p) => p.z <= 4)).toBe(true);
   });
 });

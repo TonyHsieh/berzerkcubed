@@ -9,11 +9,11 @@ import type {
   PlayerState,
   Projectile,
 } from '../engine/types';
-import { applyBossDamageToPlayer } from './bossUtils';
+import { applyBossDamageToPlayer, stepBossCommonTimers } from './bossUtils';
 
-const MAXIMILIAN_BASE_RADIUS = 34;
-const MAXIMILIAN_BLADE_RADIUS = 58;
-const MAXIMILIAN_WHIRLWIND_BLADE_RADIUS = 70;
+const MAXIMILIAN_BASE_RADIUS = 48;
+const MAXIMILIAN_BLADE_RADIUS = 72;
+const MAXIMILIAN_WHIRLWIND_BLADE_RADIUS = 88;
 const MAXIMILIAN_MAX_HP = 1200;
 const MAXIMILIAN_SHIELD_HP = 260;
 const STANDARD_SHOT_SHIELD_DAMAGE = 7;
@@ -35,7 +35,7 @@ const BLADE_CONTACT_DAMAGE = 32;
 // guard his frontal arc while stalking/charging, heavy attacks punch through the
 // whirlwind, and recovery leaves his core completely exposed.
 const BLADE_ARC_HALF_DEG = 75;
-const RETRACTED_BLADE_RADIUS = 34;
+const RETRACTED_BLADE_RADIUS = 44;
 
 const MAXIMILIAN_TAUNTS = [
   'INTRUDER DETECTED. TERMINATE.',
@@ -130,9 +130,8 @@ export function updateMaximilian(
 ): void {
   if (dt <= 0 || boss.hp <= 0) return;
 
-  if (boss.hitFlash > 0) {
-    boss.hitFlash = Math.max(0, boss.hitFlash - dt);
-  }
+  const common = stepBossCommonTimers(boss, dt, events);
+  if (common.rezzing) return;
 
   const dx = player.x - boss.x;
   const dy = player.y - boss.y;
@@ -140,7 +139,7 @@ export function updateMaximilian(
   const dirX = dist > 1e-4 ? dx / dist : 0;
   const dirY = dist > 1e-4 ? dy / dist : 1;
 
-  boss.phaseTimer -= dt;
+  boss.phaseTimer -= dt * common.speedMult;
 
   // Phase transitions
   if (boss.phaseTimer <= 0) {

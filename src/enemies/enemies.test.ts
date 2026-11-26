@@ -8,15 +8,22 @@ import type {
 } from '../engine/types';
 import {
   createEnforcer,
+  createVBotMelee,
   type SpatialQueryGrid,
   updateEnforcers,
 } from './enforcer';
 import {
   createGrenadier,
   createLaserShooter,
+  createVBotLaser,
+  ENEMY_FIRE_ANIM_SEC,
   updateRangedEnemies,
 } from './shooter';
-import { resetSpawnerCounter, spawnHordeWave } from './spawner';
+import {
+  DEFAULT_REZ_DURATION,
+  resetSpawnerCounter,
+  spawnHordeWave,
+} from './spawner';
 
 function makePlayer(x = 400, y = 400): PlayerState {
   return {
@@ -388,5 +395,102 @@ describe('Horde Spawner (Bridge/Gate Spawning & Caps)', () => {
     const spawned = spawnHordeWave(island, deadEnforcers, config, 1);
     const newMelee = spawned.filter((e) => e.kind === 'enforcer_melee').length;
     expect(newMelee).toBe(10);
+  });
+});
+
+describe('Milestone 4.11 — V-Bots, fireAnimTimer & Rez-In Spawning', () => {
+  it('v_bot_melee rushes faster than enforcer_melee', () => {
+    const config = createDifficultyConfig();
+    const player = makePlayer(600, 300);
+    const island = makeIsland();
+    const grid = new TestSpatialGrid(64);
+
+    const enf = createEnforcer('cmp_enf', 200, 260, config);
+    const vbot = createVBotMelee('cmp_vbot', 200, 340, config);
+    const list = [enf, vbot];
+
+    for (let step = 0; step < 30; step++) {
+      grid.clear();
+      for (const e of list) grid.insert(e);
+      updateEnforcers(list, player, grid, island, config, 1 / 60);
+    }
+
+    const enfDist = Math.hypot(enf.x - 200, enf.y - 260);
+    const vbotDist = Math.hypot(vbot.x - 200, vbot.y - 340);
+    expect(vbotDist).toBeGreaterThan(enfDist * 1.15);
+  });
+
+  it('v_bot_laser & laser_shooter set fireAnimTimer when firing and decay it', () => {
+    const config = createDifficultyConfig();
+    const player = makePlayer(420, 400);
+    const island = makeIsland();
+    const vLaser = createVBotLaser('vls_1', 200, 400, config);
+    vLaser.fireCooldown = 0;
+    const events: GameEvent[] = [];
+
+    let fired = 0;
+    let sawFireAnim = false;
+    for (let i = 0; i < 12; i++) {
+      const bolts = updateRangedEnemies([vLaser], player, island, config, 0.08, events);
+      if (bolts.length > 0) {
+        fired += bolts.length;
+        expect(vLaser.fireAnimTimer).toBeCloseTo(ENEMY_FIRE_ANIM_SEC, 2);
+        sawFireAnim = true;
+      }
+    }
+    expect(fired).toBeGreaterThanOrEqual(1);
+    expect(sawFireAnim).toBe(true);
+    // Advance past fireAnimTimer duration -> decays back to 0
+    for (let i = 0; i < 5; i++) {
+      updateRangedEnemies([vLaser], player, island, config, 0.1, events);
+    }
+    expect(vLaser.fireAnimTimer).toBe(0);
+  });
+
+  it('rezTimer > 0 keeps enemies stationary and prevents firing until materialized', () => {
+    const config = createDifficultyConfig();
+    const player = makePlayer(400, 400);
+    const island = makeIsland();
+    const grid = new TestSpatialGrid(64);
+    const events: GameEvent[] = [];
+
+    const melee = createVBotMelee('rez_m', 200, 400, config, 1.0);
+    const shooter = createVBotLaser('rez_r', 220, 400, config, 1.0);
+    shooter.fireCooldown = 0;
+
+    // Step 0.5s: still rezzing -> must not move or telegraph/fire
+    for (let i = 0; i < 5; i++) {
+      grid.clear();
+      grid.insert(melee);
+      updateEnforcers([melee], player, grid, island, config, 0.1);
+      const shots = updateRangedEnemies([shooter], player, island, config, 0.1, events);
+      expect(shots).toHaveLength(0);
+    }
+    expect(melee.x).toBe(200);
+    expect(melee.y).toBe(400);
+    expect(shooter.telegraphTimer).toBe(0);
+    expect(melee.rezTimer).toBeGreaterThan(0);
+
+    // Finish remaining 0.6s rez-in -> now moves and telegraphs
+    for (let i = 0; i < 8; i++) {
+      grid.clear();
+      grid.insert(melee);
+      updateEnforcers([melee], player, grid, island, config, 0.1);
+      updateRangedEnemies([shooter], player, island, config, 0.1, events);
+    }
+    expect(melee.rezTimer).toBe(0);
+    expect(melee.x).toBeGreaterThan(200);
+    expect(shooter.telegraphTimer).toBeGreaterThan(0);
+  });
+
+  it('spawnHordeWave assigns rezTimer and spawns V-Bots when includeVBots is enabled', () => {
+    resetSpawnerCounter();
+    const config = createDifficultyConfig();
+    const island = makeIsland();
+    const wave = spawnHordeWave(island, [], config, 1, { includeVBots: true });
+    expect(wave.length).toBeGreaterThan(0);
+    expect(wave.every((e) => e.rezTimer === DEFAULT_REZ_DURATION)).toBe(true);
+    expect(wave.some((e) => e.kind === 'v_bot_melee')).toBe(true);
+    expect(wave.some((e) => e.kind === 'v_bot_laser')).toBe(true);
   });
 });

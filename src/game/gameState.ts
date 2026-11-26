@@ -1,4 +1,15 @@
 import { createDifficultyConfig } from '../config/difficulty';
+import { createAbb, updateAbb } from '../bosses/abb';
+import {
+  applyHigherSectorBossScaling,
+  BOSS_REZ_DURATION,
+} from '../bosses/bossUtils';
+import { createBrainbot, updateBrainbot } from '../bosses/brainbot';
+import {
+  createBugHive,
+  interceptProjectileWithOrbitingBugs,
+  updateBugHive,
+} from '../bosses/bugHive';
 import { createEvilOtto, updateEvilOtto } from '../bosses/evilOtto';
 import { createMaximilian, updateMaximilian } from '../bosses/maximilian';
 import {
@@ -6,7 +17,8 @@ import {
   damageBossPart,
   updateRecogniser,
 } from '../bosses/recogniser';
-import { updateEnforcers } from '../enemies/enforcer';
+import { createSkullhead, updateSkullhead } from '../bosses/skullhead';
+import { isMeleeEnemyKind, updateEnforcers } from '../enemies/enforcer';
 import { GRENADE_GRAVITY, updateRangedEnemies } from '../enemies/shooter';
 import { spawnHordeWave, SAFE_SPAWN_CLEARANCE } from '../enemies/spawner';
 import { createCameraState, updateCamera } from '../engine/camera';
@@ -156,13 +168,14 @@ export function createGameStateForSector(
     viewport: { width: 1280, height: 720 },
   };
 
-  // Milestone 4.1: open with a small, far-away vanguard instead of an
-  // immediate dogpile. The rest of the swarm pours in through gates/waves.
+  // Milestone 4.11: open with a small, far-away vanguard (including V-Bots)
+  // that materializes via TRON rez-in — zero instant pop-in.
   const vanguard = spawnHordeWave(state.island, state.enemies, config, safeSector, {
     heroX: spawnX,
     heroY: spawnY,
     clearance: SAFE_SPAWN_CLEARANCE,
     vanguard: true,
+    includeVBots: true,
   });
   state.enemies.push(...vanguard);
   for (let i = 0; i < vanguard.length; i++) state.grid.insert(vanguard[i]);
@@ -185,27 +198,51 @@ function createScaledBoss(
   if (kind === 'evil_otto') {
     return createEvilOtto(x, y, sectorIndex);
   }
-  const boss =
-    kind === 'recogniser' ? createRecogniser(x, y) : createMaximilian(x, y);
-
-  if (sectorIndex >= 2) {
-    const scale = 1 + (sectorIndex - 1) * 0.25;
-    boss.maxHp = Math.round(boss.maxHp * scale);
-    boss.hp = boss.maxHp;
-    for (let i = 0; i < boss.parts.length; i++) {
-      const part = boss.parts[i];
-      part.maxHp = Math.round(part.maxHp * scale);
-      part.hp = part.maxHp;
-    }
+  let boss: BossState;
+  switch (kind) {
+    case 'recogniser':
+      boss = createRecogniser(x, y);
+      break;
+    case 'abb':
+      boss = createAbb(x, y);
+      break;
+    case 'skullhead':
+      boss = createSkullhead(x, y);
+      break;
+    case 'bug_hive':
+      boss = createBugHive(x, y);
+      break;
+    case 'brainbot':
+      boss = createBrainbot(x, y);
+      break;
+    default:
+      boss = createMaximilian(x, y);
+      break;
   }
-  return boss;
+
+  return applyHigherSectorBossScaling(boss, sectorIndex);
 }
 
-export function spawnBoss(state: GameState, kind: BossKind): BossState {
+export interface SpawnBossOptions {
+  /** TRON rez-in materialization duration (seconds). */
+  rezDuration?: number;
+}
+
+export function spawnBoss(
+  state: GameState,
+  kind: BossKind,
+  options: SpawnBossOptions = {},
+): BossState {
   const b = state.island.bounds;
   const cx = b.x + b.w * 0.5;
   const cy = b.y + b.h * 0.25;
   const boss = createScaledBoss(kind, cx, cy, state.sectorIndex);
+  const rez = options.rezDuration ?? 0;
+  if (rez > 0) {
+    boss.rezTimer = rez;
+    boss.rezDuration = rez;
+    state.events.push({ type: 'sfx', sound: 'rez_in', x: cx, y: cy });
+  }
   state.boss = boss;
   if (kind === 'evil_otto') {
     state.ottoSpawned = true;
@@ -230,18 +267,29 @@ export function advanceToNextSector(state: GameState): GameState {
   return state;
 }
 
+const SECTOR_BOSS_ROTATION: readonly BossKind[] = [
+  'maximilian',
+  'recogniser',
+  'abb',
+  'skullhead',
+  'bug_hive',
+  'brainbot',
+];
+
 function getSectorBossKind(sectorIndex: number): BossKind {
-  if (sectorIndex === 0) return 'maximilian';
-  if (sectorIndex === 1) return 'recogniser';
-  return sectorIndex % 2 === 0 ? 'maximilian' : 'recogniser';
+  return SECTOR_BOSS_ROTATION[Math.max(0, sectorIndex) % SECTOR_BOSS_ROTATION.length];
 }
 
 function scoreForEnemy(kind: EnemyState['kind']): number {
   switch (kind) {
     case 'enforcer_melee':
       return 100;
+    case 'v_bot_melee':
+      return 120;
     case 'laser_shooter':
       return 150;
+    case 'v_bot_laser':
+      return 160;
     case 'grenadier':
       return 200;
   }
@@ -273,7 +321,7 @@ function detonateAreaDamage(
     const nearby = state.grid.queryRadius(x, y, blastRadius);
     for (let i = 0; i < nearby.length; i++) {
       const e = nearby[i];
-      if (e.hp <= 0) continue;
+      if (e.hp <= 0 || (e.rezTimer ?? 0) > 0) continue;
       e.hp -= damage;
       e.hitFlash = 0.14;
     }
@@ -308,6 +356,11 @@ function applyProjectileToBoss(
 ): { hit: boolean; damaged: boolean } {
   const boss = state.boss;
   if (!boss || boss.hp <= 0) return { hit: false, damaged: false };
+
+  // TRON Rez-In materialization: non-colliding and invulnerable
+  if ((boss.rezTimer ?? 0) > 0) {
+    return { hit: false, damaged: false };
+  }
 
   // Reconstructing Evil Otto is invulnerable
   if (boss.reconstructing) {
@@ -501,7 +554,7 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
 
     for (let c = 0; c < candidates.length; c++) {
       const enemy = candidates[c];
-      if (enemy.hp <= 0) continue;
+      if (enemy.hp <= 0 || (enemy.rezTimer ?? 0) > 0) continue;
 
       const dx = enemy.x - p.x;
       const dy = enemy.y - p.y;
@@ -595,8 +648,14 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
 
     if (p.life <= 0) continue;
 
-    // 3. vs Boss Parts
+    // 3. vs Boss Parts (Bug Hive orbiting bugs intercept incoming shots first)
     if (state.boss && state.boss.hp > 0) {
+      if (
+        state.boss.kind === 'bug_hive' &&
+        interceptProjectileWithOrbitingBugs(state.boss, p, state.events)
+      ) {
+        if (p.life <= 0) continue;
+      }
       const res = applyProjectileToBoss(state, p.x, p.y, p.radius, p.damage);
       if (res.hit) {
         if (res.damaged) {
@@ -731,11 +790,15 @@ export function stepGameState(
             heroX: state.player.x,
             heroY: state.player.y,
             clearance: SAFE_SPAWN_CLEARANCE,
+            includeVBots: true,
           },
         );
         if (spawned.length > 0) {
-          // Brief gate telegraph so the player sees where the horde enters.
-          state.events.push({ type: 'sfx', sound: 'door_hum', x: state.player.x, y: state.player.y });
+          // Gate telegraph + TRON rez-in synth chime
+          state.events.push(
+            { type: 'sfx', sound: 'door_hum', x: state.player.x, y: state.player.y },
+            { type: 'sfx', sound: 'rez_in', x: state.player.x, y: state.player.y },
+          );
           state.enemies.push(...spawned);
           for (let i = 0; i < spawned.length; i++) {
             state.grid.insert(spawned[i]);
@@ -751,7 +814,9 @@ export function stepGameState(
         }
       }
     } else if (state.enemies.length === 0) {
-      spawnBoss(state, getSectorBossKind(state.sectorIndex));
+      spawnBoss(state, getSectorBossKind(state.sectorIndex), {
+        rezDuration: BOSS_REZ_DURATION,
+      });
     }
   }
 
@@ -780,7 +845,7 @@ export function stepGameState(
   // Enemy world hazards (electrified walls / open-edge falls) & melee contact
   for (let i = 0; i < state.enemies.length; i++) {
     const e = state.enemies[i];
-    if (e.hp <= 0) continue;
+    if (e.hp <= 0 || (e.rezTimer ?? 0) > 0) continue;
 
     const worldRes = resolveEntityAgainstWorld(e, state.island);
     if (worldRes.hitElectrifiedWall) {
@@ -792,7 +857,7 @@ export function stepGameState(
       e.hp = 0;
     }
 
-    if (e.hp > 0 && e.kind === 'enforcer_melee') {
+    if (e.hp > 0 && isMeleeEnemyKind(e.kind)) {
       const dx = state.player.x - e.x;
       const dy = state.player.y - e.y;
       const hitDist = state.player.radius + e.radius;
@@ -870,6 +935,48 @@ export function stepGameState(
       );
       if (ottoFired.length > 0) {
         state.bossProjectiles.push(...ottoFired);
+      }
+    } else if (state.boss.kind === 'abb') {
+      const abbFired = updateAbb(
+        state.boss,
+        state.player,
+        state.island,
+        clampedDt,
+        state.events,
+      );
+      if (abbFired.length > 0) {
+        state.bossProjectiles.push(...abbFired);
+      }
+    } else if (state.boss.kind === 'skullhead') {
+      const skullFired = updateSkullhead(
+        state.boss,
+        state.player,
+        clampedDt,
+        state.events,
+      );
+      if (skullFired.length > 0) {
+        state.bossProjectiles.push(...skullFired);
+      }
+    } else if (state.boss.kind === 'bug_hive') {
+      const hiveFired = updateBugHive(
+        state.boss,
+        state.player,
+        clampedDt,
+        state.events,
+      );
+      if (hiveFired.length > 0) {
+        state.bossProjectiles.push(...hiveFired);
+      }
+    } else if (state.boss.kind === 'brainbot') {
+      const brainFired = updateBrainbot(
+        state.boss,
+        state.player,
+        state.island,
+        clampedDt,
+        state.events,
+      );
+      if (brainFired.length > 0) {
+        state.bossProjectiles.push(...brainFired);
       }
     }
   }

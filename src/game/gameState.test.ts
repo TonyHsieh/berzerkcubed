@@ -489,3 +489,79 @@ describe('Milestone 4.1 — Safe spawn & effortless pickups', () => {
     expect(state.pickups).toHaveLength(0);
   });
 });
+
+describe('Milestone 4.11 — Rez-In Protection & New Bosses Integration', () => {
+  it('blocks player projectiles against rezzing enemies and bosses until rezTimer reaches 0', () => {
+    const config = createDifficultyConfig();
+    const state = createGameStateForSector(0, config);
+    state.enemies.length = 0;
+    state.waveIndex = state.wavesPerSector;
+    state.player.invulnTimer = 10;
+
+    const rezzingEnemy = createEnforcer('rez_test_e', 100, 0, config, 1.0);
+    state.enemies.push(rezzingEnemy);
+    const boss = spawnBoss(state, 'abb', { rezDuration: 1.0 });
+
+    state.playerProjectiles.push(
+      {
+        id: 'shot_e',
+        owner: 'player',
+        kind: 'bolt',
+        x: rezzingEnemy.x,
+        y: rezzingEnemy.y,
+        z: 10,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        radius: 8,
+        damage: 999,
+        life: 1,
+        maxLife: 1,
+        bouncesLeft: 0,
+        modifiers: [],
+        color: '#38bdf8',
+      },
+      {
+        id: 'shot_b',
+        owner: 'player',
+        kind: 'bolt',
+        x: boss.x,
+        y: boss.y,
+        z: 10,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        radius: 8,
+        damage: 200,
+        life: 1,
+        maxLife: 1,
+        bouncesLeft: 0,
+        modifiers: [],
+        color: '#38bdf8',
+      },
+    );
+
+    const idle = createDefaultInputState();
+    stepGameState(state, idle, FIXED_DT);
+    expect(rezzingEnemy.hp).toBe(rezzingEnemy.maxHp);
+    expect(boss.hp).toBe(boss.maxHp);
+  });
+
+  it('steps all four new bosses cleanly inside stepGameState', () => {
+    const config = createDifficultyConfig();
+    const idle = createDefaultInputState();
+    for (const kind of ['abb', 'skullhead', 'bug_hive', 'brainbot'] as const) {
+      const state = createGameStateForSector(2, config);
+      state.enemies.length = 0;
+      state.waveIndex = state.wavesPerSector;
+      state.player.invulnTimer = 10;
+      const boss = spawnBoss(state, kind);
+      expect(boss.kind).toBe(kind);
+      expect(boss.shieldLayers).toBeGreaterThanOrEqual(2);
+      for (let t = 0; t < 20; t++) {
+        stepGameState(state, idle, FIXED_DT);
+      }
+      expect(Number.isFinite(boss.x) && Number.isFinite(boss.y)).toBe(true);
+    }
+  });
+});

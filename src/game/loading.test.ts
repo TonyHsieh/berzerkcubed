@@ -25,10 +25,12 @@ describe('Async loading thermometer & chunked asset baking (Milestone 4)', () =>
         expect(updates[i].fraction).toBeGreaterThanOrEqual(updates[i - 1].fraction);
       }
 
-      // Same eight bake tasks as the synchronous renderer path: 3 enforcer +
-      // 2 shooter + 2 grenadier frames + 1 crate, each at 24 angles.
-      expect(cache.stats.bakes).toBe(8 * 24);
+      // Same twelve bake tasks as the synchronous renderer path: 3 enforcer +
+      // 2 v_bot_melee + 2 v_bot_laser + 2 shooter + 2 grenadier frames + 1 crate, each at 24 angles.
+      expect(cache.stats.bakes).toBe(12 * 24);
       expect(cache.has('enforcer_melee#0')).toBe(true);
+      expect(cache.has('v_bot_melee#0')).toBe(true);
+      expect(cache.has('v_bot_laser#0')).toBe(true);
       expect(cache.has('laser_shooter#0')).toBe(true);
       expect(cache.has('grenadier#0')).toBe(true);
       expect(cache.has('crate')).toBe(true);

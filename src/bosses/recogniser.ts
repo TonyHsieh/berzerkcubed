@@ -5,7 +5,13 @@ import type {
   PlayerState,
   Projectile,
 } from '../engine/types';
-import { applyBossDamageToPlayer, nextBossProjectileId } from './bossUtils';
+import {
+  applyBossDamageToPlayer,
+  BOSS_FIRE_ANIM_SEC,
+  nextBossProjectileId,
+  SHIELD_REGEN_DELAY_SEC,
+  stepBossCommonTimers,
+} from './bossUtils';
 
 const HOVER_Z = 22;
 const SLAM_PEAK_Z = 260;
@@ -19,7 +25,7 @@ const RECOVER_DURATION = 1.2;
 
 const LEG_MAX_HP = 250;
 const HEAD_MAX_HP = 600;
-const SLAM_SHOCKWAVE_RADIUS = 95;
+const SLAM_SHOCKWAVE_RADIUS = 115;
 const SLAM_DAMAGE = 35;
 
 let recogniserSeq = 0;
@@ -38,7 +44,7 @@ export function createRecogniser(x: number, y: number): BossState {
     vy: 0,
     vz: 0,
     angle: 0,
-    radius: 44,
+    radius: 68,
     hp: totalHp,
     maxHp: totalHp,
     phase: 'hover_barrage',
@@ -46,11 +52,11 @@ export function createRecogniser(x: number, y: number): BossState {
     parts: [
       {
         id: 'left_leg',
-        label: 'Left Strut',
-        offsetX: -36,
-        offsetY: 16,
+        label: 'Left Leg',
+        offsetX: -54,
+        offsetY: 18,
         offsetZ: -12,
-        radius: 22,
+        radius: 28,
         hp: LEG_MAX_HP,
         maxHp: LEG_MAX_HP,
         destroyed: false,
@@ -58,11 +64,11 @@ export function createRecogniser(x: number, y: number): BossState {
       },
       {
         id: 'right_leg',
-        label: 'Right Strut',
-        offsetX: 36,
-        offsetY: 16,
+        label: 'Right Leg',
+        offsetX: 54,
+        offsetY: 18,
         offsetZ: -12,
-        radius: 22,
+        radius: 28,
         hp: LEG_MAX_HP,
         maxHp: LEG_MAX_HP,
         destroyed: false,
@@ -72,9 +78,9 @@ export function createRecogniser(x: number, y: number): BossState {
         id: 'head_core',
         label: 'Head Core',
         offsetX: 0,
-        offsetY: -12,
-        offsetZ: 28,
-        radius: 28,
+        offsetY: -18,
+        offsetZ: 36,
+        radius: 36,
         hp: HEAD_MAX_HP,
         maxHp: HEAD_MAX_HP,
         destroyed: false,
@@ -86,15 +92,18 @@ export function createRecogniser(x: number, y: number): BossState {
     slamTargetX: x,
     slamTargetY: y,
     slamProgress: 0,
+    fireAnimTimer: 0,
     hitFlash: 0,
   };
 }
 
 /**
  * Applies damage to a specific boss part at world coordinates (hitX, hitY).
+ * Respects rez-in invulnerability, rampage invulnerability, Evil Otto
+ * reconstruction, and higher-sector multi-layer regenerating shields.
  * For the Recogniser, hitting `head_core` while legs remain intact deals 0 damage
  * and returns `false`. Destroying both legs unlocks `head_core.vulnerable = true`.
- * Returns `true` if damage was applied to a vulnerable part (or direct boss body).
+ * Returns `true` if damage was applied to a vulnerable part (or shield / body).
  */
 export function damageBossPart(
   boss: BossState,
@@ -103,8 +112,43 @@ export function damageBossPart(
   damage: number,
   events: GameEvent[],
 ): boolean {
-  if (boss.hp <= 0 || damage <= 0 || boss.reconstructing) {
+  if (
+    boss.hp <= 0 ||
+    damage <= 0 ||
+    boss.reconstructing ||
+    (boss.rezTimer ?? 0) > 0
+  ) {
     return false;
+  }
+
+  // Periodic Rampage Invulnerability blocks all damage
+  if ((boss.rampageTimer ?? 0) > 0) {
+    events.push({ type: 'sfx', sound: 'electric_zap', x: hitX, y: hitY });
+    return false;
+  }
+
+  // Higher-sector multi-layer regenerating shields absorb hits before hull/parts
+  if ((boss.shieldLayers ?? 0) > 0 && (boss.shieldHp ?? 0) > 0) {
+    boss.shieldHp = Math.max(0, (boss.shieldHp ?? 0) - damage);
+    boss.shieldRegenDelay = SHIELD_REGEN_DELAY_SEC;
+    boss.hitFlash = 0.1;
+    events.push({ type: 'sfx', sound: 'electric_zap', x: hitX, y: hitY });
+    if (boss.shieldHp <= 0) {
+      boss.shieldLayers = Math.max(0, (boss.shieldLayers ?? 1) - 1);
+      events.push({ type: 'sfx', sound: 'shield_break', x: boss.x, y: boss.y });
+      events.push({
+        type: 'vfx_explosion',
+        x: boss.x,
+        y: boss.y,
+        z: boss.z + 12,
+        color: '#22d3ee',
+        count: 16,
+      });
+      if (boss.shieldLayers > 0) {
+        boss.shieldHp = boss.shieldLayerHp ?? boss.shieldMaxHp ?? 120;
+      }
+    }
+    return true;
   }
 
   if (boss.parts.length === 0) {
@@ -320,12 +364,11 @@ export function updateRecogniser(
   const spawned: Projectile[] = [];
   if (dt <= 0 || boss.hp <= 0) return spawned;
 
-  if (boss.hitFlash > 0) {
-    boss.hitFlash = Math.max(0, boss.hitFlash - dt);
-  }
+  const common = stepBossCommonTimers(boss, dt, events);
+  if (common.rezzing) return spawned;
 
   const prevTimer = boss.phaseTimer;
-  boss.phaseTimer -= dt;
+  boss.phaseTimer -= dt * common.speedMult;
 
   const dx = player.x - boss.x;
   const dy = player.y - boss.y;
@@ -347,12 +390,14 @@ export function updateRecogniser(
 
     // Geometric bullet curtain wave 1
     if (prevTimer > 2.2 && boss.phaseTimer <= 2.2) {
+      boss.fireAnimTimer = BOSS_FIRE_ANIM_SEC;
       spawned.push(...spawnBulletPattern(boss, 8, 220, 0, '#00e5ff'));
       events.push({ type: 'sfx', sound: 'shoot', x: boss.x, y: boss.y });
     }
 
     // Homing drones + offset bullet curtain wave 2
     if (prevTimer > 1.1 && boss.phaseTimer <= 1.1) {
+      boss.fireAnimTimer = BOSS_FIRE_ANIM_SEC;
       spawned.push(...spawnHomingDrones(boss, player, 2));
       spawned.push(
         ...spawnBulletPattern(boss, 8, 220, Math.PI / 8, '#ff2a77'),

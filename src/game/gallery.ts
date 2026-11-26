@@ -36,15 +36,43 @@ function syntheticWallSlices(): HTMLCanvasElement[] {
   });
 }
 
+function combineRecogniserLegs(left: HTMLCanvasElement[], right: HTMLCanvasElement[]): HTMLCanvasElement[] {
+  const len = Math.max(left.length, right.length);
+  return Array.from({ length: len }, (_, i) => {
+    const c = document.createElement('canvas');
+    c.width = 24;
+    c.height = 24;
+    const ctx = c.getContext('2d');
+    if (ctx) {
+      if (left[i]) ctx.drawImage(left[i], 0, 0);
+      if (right[i]) ctx.drawImage(right[i], 0, 0);
+    }
+    return c;
+  });
+}
+
 function entries(models: ModelSet): GalleryEntry[] {
   return [
     { label: 'HERO', slices: () => [...models.hero.legsIdle, ...models.hero.torso] },
-    { label: 'MELEE ENFORCER', slices: () => models.enforcer[0] },
+    { label: 'RED ROBOT (ENFORCER)', slices: () => models.enforcer[0] },
+    { label: 'RED V-BOT (MELEE)', slices: () => models.vBotMelee[0] },
+    { label: 'YELLOW V-BOT (LASER)', slices: () => models.vBotLaser[0] },
     { label: 'LASER SHOOTER', slices: () => models.laserShooter[0] },
     { label: 'GRENADIER', slices: () => models.grenadier[0] },
     { label: 'MAXIMILIAN', slices: () => [...models.maximilian.body, ...models.maximilian.blades] },
-    { label: 'RECOGNISER', slices: () => [...models.recogniser.legs[0], ...models.recogniser.head] },
+    {
+      label: 'RECOGNISER (2-LEG)',
+      slices: () => [
+        ...combineRecogniserLegs(models.recogniser.legs[0], models.recogniser.legs[1]),
+        ...models.recogniser.head,
+      ],
+    },
     { label: 'EVIL OTTO', slices: () => models.evilOtto.classic },
+    { label: 'ABB // TANK-MECH', slices: () => models.abb },
+    { label: 'SKULLHEAD', slices: () => [...models.skullhead.body, ...models.skullhead.halo] },
+    { label: 'TECH HIVE', slices: () => models.bugHive.hive },
+    { label: 'FLYING BUG BOT', slices: () => models.bugHive.bugBot },
+    { label: 'BRAINBOT', slices: () => models.brainbot },
     {
       label: 'POWER-UPS',
       slices: () => [

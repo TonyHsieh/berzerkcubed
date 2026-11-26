@@ -200,7 +200,8 @@ export interface Projectile {
     | 'grenade'
     | 'mine'
     | 'sky_bomb'
-    | 'homing_drone';
+    | 'homing_drone'
+    | 'electric_wave';
   x: number;
   y: number;
   z: number;
@@ -220,7 +221,12 @@ export interface Projectile {
 
 // ---------- Enemies & Bosses ----------
 
-export type EnemyKind = 'enforcer_melee' | 'laser_shooter' | 'grenadier';
+export type EnemyKind =
+  | 'enforcer_melee'
+  | 'v_bot_melee'
+  | 'v_bot_laser'
+  | 'laser_shooter'
+  | 'grenadier';
 
 export interface EnemyState {
   id: string;
@@ -239,11 +245,37 @@ export interface EnemyState {
   telegraphTimer: number;
   freezeTimer: number;
   hitFlash: number;
+  /** Milestone 4.11: firing animation timer (~0.22s) for barrel recoil / muzzle flash. */
+  fireAnimTimer?: number;
+  /** Milestone 4.11: TRON rez-in materialization countdown (>0 = invulnerable, stationary). */
+  rezTimer?: number;
+  rezDuration?: number;
 }
 
-export type BossKind = 'maximilian' | 'recogniser' | 'evil_otto';
+export type BossKind =
+  | 'maximilian'
+  | 'recogniser'
+  | 'evil_otto'
+  | 'abb'
+  | 'skullhead'
+  | 'bug_hive'
+  | 'brainbot';
 
 export type OttoVariant = 'classic' | 'volt' | 'cryo' | 'vortex';
+
+export interface OrbitingBugBot {
+  id: string;
+  angle: number;
+  orbitRadius: number;
+  hp: number;
+  maxHp: number;
+  state: 'orbit' | 'swoop';
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  swoopTimer: number;
+}
 
 export interface BossPart {
   id: string;
@@ -282,6 +314,18 @@ export interface BossState {
   shieldMaxHp?: number;
   /** True while the boss can be damaged (blades retracted / shield broken). */
   vulnerable?: boolean;
+  // Milestone 4.11: higher-sector multi-layer regenerating shields & rampage invulnerability
+  shieldLayers?: number;
+  maxShieldLayers?: number;
+  shieldLayerHp?: number;
+  shieldRegenDelay?: number;
+  rampageTimer?: number;
+  rampageCooldown?: number;
+  /** Milestone 4.11: firing recoil / muzzle flash timer. */
+  fireAnimTimer?: number;
+  /** Milestone 4.11: TRON rez-in materialization countdown. */
+  rezTimer?: number;
+  rezDuration?: number;
   // Recogniser sky-slam shadow telegraph
   slamTargetX?: number;
   slamTargetY?: number;
@@ -289,6 +333,17 @@ export interface BossState {
   // Evil Otto variant & reconstruction
   ottoVariant?: OttoVariant;
   reconstructing?: boolean;
+  // ABB dodge-dash state
+  dashTimer?: number;
+  dashDirX?: number;
+  dashDirY?: number;
+  // Skullhead twin sweeping eye-laser state
+  laserTelegraphTimer?: number;
+  laserActiveTimer?: number;
+  laserSweepAngle?: number;
+  laserSweepDir?: number;
+  // Bug Hive orbiting bug-bot shield
+  orbitingBugs?: OrbitingBugBot[];
   hitFlash: number;
 }
 

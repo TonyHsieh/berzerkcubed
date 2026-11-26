@@ -23,6 +23,8 @@ export interface SpatialQueryGrid<
 }
 
 export const ENFORCER_RADIUS = 13;
+export const VBOT_MELEE_RADIUS = 12;
+const VBOT_MELEE_SPEED_MULT = 1.3;
 const FROZEN_SPEED_MULT = 0.35;
 const SEPARATION_WEIGHT = 1.65;
 const STEER_RESPONSIVENESS = 10;
@@ -32,6 +34,7 @@ export function createEnforcer(
   x: number,
   y: number,
   config: DifficultyConfig,
+  rezDuration = 0,
 ): EnemyState {
   return {
     id,
@@ -50,12 +53,54 @@ export function createEnforcer(
     telegraphTimer: 0,
     freezeTimer: 0,
     hitFlash: 0,
+    fireAnimTimer: 0,
+    rezTimer: rezDuration,
+    rezDuration,
   };
 }
 
 /**
- * Updates 200+ melee Tron Enforcers with player-chasing flank steering,
- * O(1)-grid spatial separation, freeze slow, and world wall/crate collision.
+ * Red V-Bot: aggressive fast melee rusher riding on a single central wheel.
+ */
+export function createVBotMelee(
+  id: string,
+  x: number,
+  y: number,
+  config: DifficultyConfig,
+  rezDuration = 0,
+): EnemyState {
+  const hp = Math.max(10, Math.round(config.enforcerHp * 0.85));
+  return {
+    id,
+    kind: 'v_bot_melee',
+    x,
+    y,
+    z: 0,
+    vx: 0,
+    vy: 0,
+    radius: VBOT_MELEE_RADIUS,
+    angle: 0,
+    animFrame: hashToUnit(id) * 4,
+    hp,
+    maxHp: hp,
+    fireCooldown: 0,
+    telegraphTimer: 0,
+    freezeTimer: 0,
+    hitFlash: 0,
+    fireAnimTimer: 0,
+    rezTimer: rezDuration,
+    rezDuration,
+  };
+}
+
+export function isMeleeEnemyKind(kind: EnemyState['kind']): boolean {
+  return kind === 'enforcer_melee' || kind === 'v_bot_melee';
+}
+
+/**
+ * Updates 200+ melee Enforcers & Red V-Bots with player-chasing flank steering,
+ * O(1)-grid spatial separation, freeze slow, rez-in materialization pause, and
+ * world wall/crate collision.
  */
 export function updateEnforcers(
   enemies: EnemyState[],
@@ -71,7 +116,15 @@ export function updateEnforcers(
 
   for (let i = 0; i < enemies.length; i++) {
     const enemy = enemies[i];
-    if (enemy.kind !== 'enforcer_melee' || enemy.hp <= 0) continue;
+    if (!isMeleeEnemyKind(enemy.kind) || enemy.hp <= 0) continue;
+
+    // TRON Rez-In materialization: stationary, invulnerable, cannot attack
+    if ((enemy.rezTimer ?? 0) > 0) {
+      enemy.rezTimer = Math.max(0, (enemy.rezTimer ?? 0) - dt);
+      enemy.vx = 0;
+      enemy.vy = 0;
+      continue;
+    }
 
     if (enemy.hitFlash > 0) {
       enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
@@ -82,8 +135,9 @@ export function updateEnforcers(
       enemy.freezeTimer = Math.max(0, enemy.freezeTimer - dt);
     }
 
+    const kindMult = enemy.kind === 'v_bot_melee' ? VBOT_MELEE_SPEED_MULT : 1;
     const effectiveSpeed =
-      config.enforcerSpeed * (isFrozen ? FROZEN_SPEED_MULT : 1);
+      config.enforcerSpeed * kindMult * (isFrozen ? FROZEN_SPEED_MULT : 1);
 
     // 1. Seek vector toward player with subtle per-enemy flanking angle at mid/far range
     const toPlayerX = player.x - enemy.x;
@@ -114,7 +168,14 @@ export function updateEnforcers(
 
     for (let j = 0; j < neighbors.length; j++) {
       const other = neighbors[j];
-      if (other === enemy || other.id === enemy.id || other.hp <= 0) continue;
+      if (
+        other === enemy ||
+        other.id === enemy.id ||
+        other.hp <= 0 ||
+        (other.rezTimer ?? 0) > 0
+      ) {
+        continue;
+      }
 
       const dx = enemy.x - other.x;
       const dy = enemy.y - other.y;

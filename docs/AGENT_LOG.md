@@ -141,3 +141,34 @@ Spec: `docs/specs/milestone-4.1-fixes.md` (plan-only; synthesizer will replace w
   - `pnpm run build`: **PASSED** — 0 TypeScript errors, 996 modules, inline boot screen + 12 dynamic chunks.
   - `pnpm test`: **PASSED** — **14 test files, 88/88 tests** (73 prior + 15 new).
   - HTTP smoke test: `vite preview` served the built `index.html` with all inline boot markers and all 13 JS chunks at HTTP 200. (Real-browser CDP navigation was unavailable in this runner, so no in-browser console assertion is claimed.)
+
+---
+
+## Milestone 4.11 — Sample-Art Visual Overhaul, Maze Rooms, Rez-In Spawning & New Bosses
+
+Spec: `docs/specs/milestone-4.11-tweaks.md`.
+
+- **Files created**:
+  - `src/bosses/abb.ts` — `createAbb`, `updateAbb` (ABB Tank-Mech: dodge-dash repositioning + 360° ring of guided homing missiles).
+  - `src/bosses/skullhead.ts` — `createSkullhead`, `updateSkullhead` (Floating Skullhead: telegraphed twin sweeping eye-laser beams).
+  - `src/bosses/bugHive.ts` — `createBugHive`, `updateBugHive`, `interceptProjectileWithOrbitingBugs` (Tech Hive + whirling Flying Bug Bot shield that intercepts player shots, peels off in swooping attacks, and replenishes).
+  - `src/bosses/brainbot.ts` — `createBrainbot`, `updateBrainbot` (Rolling Brainbot: rapid rolling movement + crackling ground-hugging `electric_wave` fans).
+- **Files modified**:
+  - `src/engine/types.ts` — added `v_bot_melee`/`v_bot_laser` to `EnemyKind`, `fireAnimTimer`/`rezTimer`/`rezDuration` to `EnemyState` & `BossState`, `electric_wave` to `Projectile['kind']`, `abb`/`skullhead`/`bug_hive`/`brainbot` to `BossKind`, `OrbitingBugBot`, and higher-sector `shieldLayers`/`maxShieldLayers`/`shieldLayerHp`/`shieldRegenDelay`/`rampageTimer`/`rampageCooldown` + new boss state fields.
+  - `src/audio/soundEngine.ts` — added `'rez_in'` synth SFX.
+  - `src/world/levelData.ts` — upgraded `createSectorIsland(sectorIndex, seed?)` to generate Berzerk-style randomized orthogonal corridor mazes (2–4 wide cardinal doorways, L-walls, T-junctions, pillars) with BFS-verified connectivity (`isMazeFullyConnected`, `getDoorwayAnchors`).
+  - `src/enemies/enforcer.ts` — added `createVBotMelee`, `isMeleeEnemyKind`, rez-in materialization pause, and faster Red V-Bot rushing.
+  - `src/enemies/shooter.ts` — added `createVBotLaser`, `isRangedEnemyKind`, `ENEMY_FIRE_ANIM_SEC`, `fireAnimTimer` trigger/decay on firing, and rez-in pause.
+  - `src/enemies/spawner.ts` — added `DEFAULT_REZ_DURATION = 1.0` (zero pop-in spawning) and `includeVBots` wave/vanguard mixing while keeping legacy cap behavior backward-compatible.
+  - `src/bosses/bossUtils.ts` — added `BOSS_REZ_DURATION`, `BOSS_FIRE_ANIM_SEC`, `RAMPAGE_DURATION_SEC`, `RAMPAGE_COOLDOWN_SEC`, `applyHigherSectorBossScaling`, `stepBossCommonTimers`.
+  - `src/bosses/maximilian.ts`, `src/bosses/recogniser.ts`, `src/bosses/evilOtto.ts` — scaled hitboxes, wired `stepBossCommonTimers` & `fireAnimTimer`, updated `damageBossPart` for rez-in invulnerability, rampage invulnerability, and multi-layer regenerating shields.
+  - `src/render/models.ts` — replaced black/near-black enemy silhouettes with light/medium metallic greys (`#64748b`, `#94a3b8`, `#cbd5e1`) + high-contrast accents; redesigned `enforcer_melee`, `laser_shooter`, `grenadier`, and 2-legged `recogniser` (`legs: [left, right]`); added `buildVBotMeleeFrames`, `buildVBotLaserFrames`, `buildAbb`, `buildSkullhead`, `buildBugHive`, `buildBrainbot`; updated `getBakeTasks` (12×24 angles).
+  - `src/game/gameState.ts` — wired V-bots, rez-in invulnerability/non-collision, all 4 new bosses (plus Bug Hive shot interception), higher-sector scaling, and 6-boss sector rotation.
+  - `src/game/renderer.ts` — added TRON rez-in vertical scan beam + bottom-to-top clip reveal, enemy/boss firing recoil & muzzle flash, 2–3× boss render scale (`4.5×–5.0×`), 2-legged Recogniser + sparking sockets, multi-layer shield rings, Rampage golden/crimson aura + banner, all 4 new bosses (ABB afterimages, Skullhead twin targeting/eye-lasers, Bug Hive orbiting bugs, Brainbot glass dome), and `electric_wave` crackling floor arcs.
+  - `src/game/hud.ts` — segmented multi-layer boss shield bars, `RAMPAGE — INVULNERABLE!` banner, and quick-spawn buttons for all 7 bosses.
+  - `src/game/gallery.ts` — added all redesigned enemies, V-bots, 2-legged Recogniser, and all 4 new bosses (+ Flying Bug Bot).
+  - `src/main.ts` — HUD quick-spawn passes `{ rezDuration: 1.0 }`.
+  - Tests updated/added: `src/world/levelData.test.ts` (+2), `src/enemies/enemies.test.ts` (+4), `src/bosses/bosses.test.ts` (+6), `src/game/gameState.test.ts` (+2), `src/render/spriteStack.test.ts` (expanded assertions), `src/game/loading.test.ts` (updated to 12×24 bake tasks).
+- **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed).
+  - `pnpm test` (`vitest run`): **PASSED** — **14 test files passed (14), 102 tests passed (102)** (all 88 prior tests + 14 new Milestone 4.11 tests).

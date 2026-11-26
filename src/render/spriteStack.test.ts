@@ -93,6 +93,13 @@ describe('spriteStack caching', () => {
     expect(models.enforcer.length).toBeGreaterThanOrEqual(2);
     expect(models.enforcer.length).toBeLessThanOrEqual(4);
     expect(cache.has('laser_shooter#0') && cache.has('grenadier#0') && cache.has('crate')).toBe(true);
+    expect(cache.has('v_bot_melee#0') && cache.has('v_bot_laser#0')).toBe(true);
+    expect(models.recogniser.legs).toHaveLength(2);
+    expect(models.abb.length).toBeGreaterThan(0);
+    expect(models.skullhead.body.length).toBeGreaterThan(0);
+    expect(models.bugHive.hive.length).toBeGreaterThan(0);
+    expect(models.bugHive.bugBot.length).toBeGreaterThan(0);
+    expect(models.brainbot.length).toBeGreaterThan(0);
     expect(models.evilOtto.vortex.length).toBeGreaterThan(0);
   });
 });

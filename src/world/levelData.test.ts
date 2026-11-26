@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { PlatformIsland } from '../engine/types';
-import { createSectorIsland, SPAWN_CLEAR_RADIUS } from './levelData';
+import {
+  createSectorIsland,
+  getDoorwayAnchors,
+  isMazeFullyConnected,
+  SPAWN_CLEAR_RADIUS,
+} from './levelData';
 
 function signature(island: PlatformIsland): string {
   return JSON.stringify({
@@ -60,5 +65,25 @@ describe('Milestone 4.1 — Procedural randomized room layouts (Fix 2)', () => {
       expect(island.crates.length).toBeGreaterThan(0);
       expect(island.walls.some((w) => w.electrified)).toBe(true);
     }
+  });
+});
+
+describe('Milestone 4.11 — Randomized Berzerk Maze Connectivity', () => {
+  it('guarantees hero spawn reaches every cardinal doorway and open corridor across seeds and sectors', () => {
+    for (let sector = 0; sector < 4; sector++) {
+      for (let seed = 1; seed <= 10; seed++) {
+        const island = createSectorIsland(sector, sector * 100 + seed);
+        const anchors = getDoorwayAnchors(island);
+        expect(anchors.length).toBeGreaterThanOrEqual(2);
+        expect(anchors.length).toBeLessThanOrEqual(4);
+        expect(isMazeFullyConnected(island)).toBe(true);
+      }
+    }
+  });
+
+  it('generates internal orthogonal maze partitions on every room', () => {
+    const island = createSectorIsland(0, 777);
+    const internalWalls = island.walls.filter((w) => !w.id.includes('_wall_'));
+    expect(internalWalls.length).toBeGreaterThanOrEqual(4);
   });
 });

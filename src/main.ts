@@ -73,7 +73,7 @@ async function boot(): Promise<void> {
 
   const hud = hudMod.createHud({
     onSpawnBoss: (kind) => {
-      gameStateMod.spawnBoss(state, kind);
+      gameStateMod.spawnBoss(state, kind, { rezDuration: 1.0 });
     },
     onNextSector: () => {
       gameStateMod.advanceToNextSector(state);

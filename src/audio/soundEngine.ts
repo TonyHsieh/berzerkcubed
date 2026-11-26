@@ -11,11 +11,12 @@ export type SoundName =
   | 'door_hum'
   | 'blade_whirr'
   | 'slam_impact'
-  | 'electric_zap';
+  | 'electric_zap'
+  | 'rez_in';
 
 export const SOUND_NAMES: readonly SoundName[] = [
   'shoot', 'dodge', 'hit', 'explosion', 'shield_break',
-  'door_hum', 'blade_whirr', 'slam_impact', 'electric_zap',
+  'door_hum', 'blade_whirr', 'slam_impact', 'electric_zap', 'rez_in',
 ];
 
 export const isSoundName = (s: string): s is SoundName => (SOUND_NAMES as readonly string[]).includes(s);
@@ -63,6 +64,7 @@ export class SoundEngine {
       blade_whirr: (t) => noise.triggerAttackRelease('8n', t),
       slam_impact: (t) => { thump.triggerAttackRelease('A0', '4n', t); boom.triggerAttackRelease('4n', t); },
       electric_zap: (t) => { zap.triggerAttackRelease('C6', '32n', t); zap.frequency.setValueAtTime(2200, t); zap.frequency.exponentialRampToValueAtTime(220, t + 0.09); },
+      rez_in: (t) => { hum.triggerAttackRelease('C4', '8n', t); hum.frequency.setValueAtTime(260, t); hum.frequency.exponentialRampToValueAtTime(1040, t + 0.24); },
     };
 
     const bassSynth = new Tone.MonoSynth({ oscillator: { type: 'sawtooth' }, filter: { Q: 2, type: 'lowpass', rolloff: -24 }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.3, release: 0.1 } }).connect(new Tone.Volume(-14).toDestination());

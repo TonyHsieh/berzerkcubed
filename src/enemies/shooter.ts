@@ -13,14 +13,22 @@ import {
 } from './enemyUtils';
 
 export const SHOOTER_RADIUS = 14;
+export const VBOT_LASER_RADIUS = 13;
 export const GRENADIER_RADIUS = 15;
 export const GRENADE_GRAVITY = 380;
+export const ENEMY_FIRE_ANIM_SEC = 0.22;
 
 const SHOOTER_PREF_MIN = 170;
 const SHOOTER_PREF_MAX = 300;
 const SHOOTER_FIRE_RANGE = 480;
 const SHOOTER_TELEGRAPH_SEC = 0.55;
 const SHOOTER_COOLDOWN_SEC = 1.65;
+
+const VBOT_LASER_PREF_MIN = 150;
+const VBOT_LASER_PREF_MAX = 270;
+const VBOT_LASER_FIRE_RANGE = 440;
+const VBOT_LASER_TELEGRAPH_SEC = 0.42;
+const VBOT_LASER_COOLDOWN_SEC = 1.35;
 
 const GRENADIER_PREF_MIN = 210;
 const GRENADIER_PREF_MAX = 380;
@@ -43,6 +51,7 @@ export function createLaserShooter(
   x: number,
   y: number,
   config: DifficultyConfig,
+  rezDuration = 0,
 ): EnemyState {
   const stagger = hashToUnit(id) * 0.9;
   return {
@@ -62,6 +71,45 @@ export function createLaserShooter(
     telegraphTimer: 0,
     freezeTimer: 0,
     hitFlash: 0,
+    fireAnimTimer: 0,
+    rezTimer: rezDuration,
+    rezDuration,
+  };
+}
+
+/**
+ * Yellow V-Bot: mid-range laser shooter with yellow/white striped V-body,
+ * firing glowing bolts from its central optical eye emitter with firing flash.
+ */
+export function createVBotLaser(
+  id: string,
+  x: number,
+  y: number,
+  config: DifficultyConfig,
+  rezDuration = 0,
+): EnemyState {
+  const stagger = hashToUnit(id) * 0.7;
+  const hp = Math.max(12, Math.round(config.shooterHp * 0.9));
+  return {
+    id,
+    kind: 'v_bot_laser',
+    x,
+    y,
+    z: 0,
+    vx: 0,
+    vy: 0,
+    radius: VBOT_LASER_RADIUS,
+    angle: 0,
+    animFrame: hashToUnit(id) * 4,
+    hp,
+    maxHp: hp,
+    fireCooldown: 0.4 + stagger,
+    telegraphTimer: 0,
+    freezeTimer: 0,
+    hitFlash: 0,
+    fireAnimTimer: 0,
+    rezTimer: rezDuration,
+    rezDuration,
   };
 }
 
@@ -70,6 +118,7 @@ export function createGrenadier(
   x: number,
   y: number,
   config: DifficultyConfig,
+  rezDuration = 0,
 ): EnemyState {
   const stagger = hashToUnit(id) * 1.1;
   return {
@@ -89,12 +138,19 @@ export function createGrenadier(
     telegraphTimer: 0,
     freezeTimer: 0,
     hitFlash: 0,
+    fireAnimTimer: 0,
+    rezTimer: rezDuration,
+    rezDuration,
   };
 }
 
+export function isRangedEnemyKind(kind: EnemyState['kind']): boolean {
+  return kind === 'laser_shooter' || kind === 'v_bot_laser' || kind === 'grenadier';
+}
+
 /**
- * Updates Laser Shooters (mid-range strafe + red laser telegraph + plasma bolt)
- * and Grenadiers (mid-long range + Z-arc plasma grenade with ground warning target).
+ * Updates Laser Shooters, Yellow V-Bots (mid-range laser), and Grenadiers.
+ * Respects rez-in materialization pause and sets `fireAnimTimer` (~0.22s) on fire.
  */
 export function updateRangedEnemies(
   enemies: EnemyState[],
@@ -111,15 +167,24 @@ export function updateRangedEnemies(
 
   for (let i = 0; i < enemies.length; i++) {
     const enemy = enemies[i];
-    if (
-      (enemy.kind !== 'laser_shooter' && enemy.kind !== 'grenadier') ||
-      enemy.hp <= 0
-    ) {
+    if (!isRangedEnemyKind(enemy.kind) || enemy.hp <= 0) {
+      continue;
+    }
+
+    // TRON Rez-In materialization: stationary, invulnerable, cannot attack or fire
+    if ((enemy.rezTimer ?? 0) > 0) {
+      enemy.rezTimer = Math.max(0, (enemy.rezTimer ?? 0) - dt);
+      enemy.vx = 0;
+      enemy.vy = 0;
       continue;
     }
 
     if (enemy.hitFlash > 0) {
       enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
+    }
+
+    if ((enemy.fireAnimTimer ?? 0) > 0) {
+      enemy.fireAnimTimer = Math.max(0, (enemy.fireAnimTimer ?? 0) - dt);
     }
 
     const isFrozen = enemy.freezeTimer > 0;
@@ -128,7 +193,9 @@ export function updateRangedEnemies(
     }
 
     const rateScale = isFrozen ? FROZEN_RATE_MULT : 1;
-    const moveSpeed = baseMoveSpeed * (isFrozen ? FROZEN_SPEED_MULT : 1);
+    const isVBotLaser = enemy.kind === 'v_bot_laser';
+    const speedMult = isVBotLaser ? 1.18 : 1;
+    const moveSpeed = baseMoveSpeed * speedMult * (isFrozen ? FROZEN_SPEED_MULT : 1);
 
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;
@@ -139,9 +206,21 @@ export function updateRangedEnemies(
     enemy.angle = vectorToAngleDeg(dirX, dirY);
 
     const isShooter = enemy.kind === 'laser_shooter';
-    const prefMin = isShooter ? SHOOTER_PREF_MIN : GRENADIER_PREF_MIN;
-    const prefMax = isShooter ? SHOOTER_PREF_MAX : GRENADIER_PREF_MAX;
-    const fireRange = isShooter ? SHOOTER_FIRE_RANGE : GRENADIER_FIRE_RANGE;
+    const prefMin = isVBotLaser
+      ? VBOT_LASER_PREF_MIN
+      : isShooter
+        ? SHOOTER_PREF_MIN
+        : GRENADIER_PREF_MIN;
+    const prefMax = isVBotLaser
+      ? VBOT_LASER_PREF_MAX
+      : isShooter
+        ? SHOOTER_PREF_MAX
+        : GRENADIER_PREF_MAX;
+    const fireRange = isVBotLaser
+      ? VBOT_LASER_FIRE_RANGE
+      : isShooter
+        ? SHOOTER_FIRE_RANGE
+        : GRENADIER_FIRE_RANGE;
 
     // Maintain preferred range; slow down while actively telegraphing a shot
     let desiredVx = 0;
@@ -176,7 +255,29 @@ export function updateRangedEnemies(
       enemy.telegraphTimer = Math.max(0, enemy.telegraphTimer - dt * rateScale);
       if (enemy.telegraphTimer <= 0) {
         const stagger = hashToUnit(enemy.id) * 0.4;
-        if (isShooter) {
+        enemy.fireAnimTimer = ENEMY_FIRE_ANIM_SEC;
+        if (isVBotLaser) {
+          const speed = config.enemyProjectileSpeed * 1.1;
+          spawned.push({
+            id: nextProjectileId('vbolt'),
+            owner: 'enemy',
+            kind: 'bolt',
+            x: enemy.x + dirX * (enemy.radius + 4),
+            y: enemy.y + dirY * (enemy.radius + 4),
+            z: 11,
+            vx: dirX * speed,
+            vy: dirY * speed,
+            vz: 0,
+            radius: 5,
+            damage: 13,
+            life: 2.4,
+            maxLife: 2.4,
+            bouncesLeft: 0,
+            modifiers: [],
+            color: '#facc15',
+          });
+          enemy.fireCooldown = VBOT_LASER_COOLDOWN_SEC + stagger;
+        } else if (isShooter) {
           const speed = config.enemyProjectileSpeed;
           spawned.push({
             id: nextProjectileId('ebolt'),
@@ -240,9 +341,11 @@ export function updateRangedEnemies(
         enemy.fireCooldown = Math.max(0, enemy.fireCooldown - dt * rateScale);
       }
       if (enemy.fireCooldown <= 0 && dist <= fireRange) {
-        enemy.telegraphTimer = isShooter
-          ? SHOOTER_TELEGRAPH_SEC
-          : GRENADIER_TELEGRAPH_SEC;
+        enemy.telegraphTimer = isVBotLaser
+          ? VBOT_LASER_TELEGRAPH_SEC
+          : isShooter
+            ? SHOOTER_TELEGRAPH_SEC
+            : GRENADIER_TELEGRAPH_SEC;
       }
     }
   }

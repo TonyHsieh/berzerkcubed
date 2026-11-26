@@ -1,0 +1,221 @@
+import {
+  resolveEnemyAgainstIsland,
+  vectorToAngleDeg,
+} from '../enemies/enemyUtils';
+import type {
+  BossState,
+  GameEvent,
+  PlatformIsland,
+  PlayerState,
+  Projectile,
+} from '../engine/types';
+import {
+  applyBossDamageToPlayer,
+  BOSS_FIRE_ANIM_SEC,
+  nextBossProjectileId,
+  stepBossCommonTimers,
+} from './bossUtils';
+
+const ABB_RADIUS = 56;
+const ABB_MAX_HP = 1350;
+const STALK_DURATION = 2.0;
+const DASH_DURATION = 0.45;
+const HALT_LAUNCH_DURATION = 1.4;
+const RECOVER_DURATION = 0.8;
+
+const STALK_SPEED = 110;
+const DASH_SPEED = 540;
+const MISSILE_RING_COUNT = 8;
+const MISSILE_SPEED = 155;
+const CONTACT_DAMAGE = 28;
+
+let abbSeq = 0;
+
+/**
+ * ABB — Another Boss Bot: light-grey armored tank-mech on dual treads.
+ * Uses rapid dodge-dash repositioning (burst speed + afterimage trail), then
+ * halts briefly and launches a 360-degree ring of guided homing missiles.
+ */
+export function createAbb(x: number, y: number): BossState {
+  abbSeq += 1;
+  return {
+    id: `boss_abb_${abbSeq}`,
+    kind: 'abb',
+    name: 'ABB // TANK-MECH',
+    x,
+    y,
+    z: 6,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    angle: 0,
+    radius: ABB_RADIUS,
+    hp: ABB_MAX_HP,
+    maxHp: ABB_MAX_HP,
+    phase: 'stalk',
+    phaseTimer: STALK_DURATION,
+    parts: [
+      {
+        id: 'abb_chassis',
+        label: 'Armored Turret',
+        offsetX: 0,
+        offsetY: 0,
+        offsetZ: 20,
+        radius: ABB_RADIUS,
+        hp: ABB_MAX_HP,
+        maxHp: ABB_MAX_HP,
+        destroyed: false,
+        vulnerable: true,
+      },
+    ],
+    bladeAngle: 0,
+    bladeRadius: 0,
+    dashTimer: 0,
+    dashDirX: 0,
+    dashDirY: 0,
+    fireAnimTimer: 0,
+    hitFlash: 0,
+  };
+}
+
+function spawnHomingMissileRing(
+  boss: BossState,
+  player: PlayerState,
+  count: number,
+): Projectile[] {
+  const missiles: Projectile[] = [];
+  for (let i = 0; i < count; i++) {
+    const theta = (i / count) * Math.PI * 2;
+    missiles.push({
+      id: nextBossProjectileId('abb_missile'),
+      owner: 'boss',
+      kind: 'homing_drone',
+      x: boss.x + Math.cos(theta) * (boss.radius * 0.75),
+      y: boss.y + Math.sin(theta) * (boss.radius * 0.75),
+      z: 18,
+      vx: Math.cos(theta) * MISSILE_SPEED,
+      vy: Math.sin(theta) * MISSILE_SPEED,
+      vz: 0,
+      radius: 8,
+      damage: 20,
+      life: 4.8,
+      maxLife: 4.8,
+      bouncesLeft: 0,
+      modifiers: [],
+      color: '#f97316',
+      targetX: player.x,
+      targetY: player.y,
+    });
+  }
+  return missiles;
+}
+
+export function updateAbb(
+  boss: BossState,
+  player: PlayerState,
+  island: PlatformIsland,
+  dt: number,
+  events: GameEvent[],
+): Projectile[] {
+  const spawned: Projectile[] = [];
+  if (dt <= 0 || boss.hp <= 0) return spawned;
+
+  const common = stepBossCommonTimers(boss, dt, events);
+  if (common.rezzing) return spawned;
+
+  const prevTimer = boss.phaseTimer;
+  boss.phaseTimer -= dt * common.speedMult;
+
+  const dx = player.x - boss.x;
+  const dy = player.y - boss.y;
+  const dist = Math.hypot(dx, dy);
+  const dirX = dist > 1e-4 ? dx / dist : 0;
+  const dirY = dist > 1e-4 ? dy / dist : 1;
+
+  if (boss.phase === 'stalk') {
+    const blend = Math.min(1, dt * 5);
+    boss.vx += (dirX * STALK_SPEED * common.speedMult - boss.vx) * blend;
+    boss.vy += (dirY * STALK_SPEED * common.speedMult - boss.vy) * blend;
+    boss.x += boss.vx * dt;
+    boss.y += boss.vy * dt;
+    boss.angle = vectorToAngleDeg(dirX, dirY);
+    boss.dashTimer = 0;
+
+    if (boss.phaseTimer <= 0) {
+      // Choose a rapid flanking dodge-dash vector perpendicular to the hero
+      const flankSign = ((Math.floor(boss.x + boss.y) & 1) === 0 ? 1 : -1);
+      const dashX = -dirY * flankSign * 0.85 + dirX * 0.35;
+      const dashY = dirX * flankSign * 0.85 + dirY * 0.35;
+      const dMag = Math.max(1e-4, Math.hypot(dashX, dashY));
+      boss.dashDirX = dashX / dMag;
+      boss.dashDirY = dashY / dMag;
+      boss.dashTimer = DASH_DURATION;
+      boss.phase = 'dodge_dash';
+      boss.phaseTimer = DASH_DURATION;
+      events.push({ type: 'sfx', sound: 'dodge', x: boss.x, y: boss.y });
+    }
+  } else if (boss.phase === 'dodge_dash') {
+    const ddx = boss.dashDirX ?? dirX;
+    const ddy = boss.dashDirY ?? dirY;
+    boss.vx = ddx * DASH_SPEED * common.speedMult;
+    boss.vy = ddy * DASH_SPEED * common.speedMult;
+    boss.x += boss.vx * dt;
+    boss.y += boss.vy * dt;
+    boss.dashTimer = Math.max(0, boss.phaseTimer);
+    boss.angle = vectorToAngleDeg(ddx, ddy);
+
+    if (boss.phaseTimer <= 0) {
+      boss.dashTimer = 0;
+      boss.vx = 0;
+      boss.vy = 0;
+      boss.phase = 'missile_halt';
+      boss.phaseTimer = HALT_LAUNCH_DURATION;
+      events.push({
+        type: 'voice_taunt',
+        text: 'TARGET LOCKED. LAUNCHING MISSILE RING.',
+        pitch: 0.65,
+        rate: 0.95,
+        speaker: 'maximilian',
+      });
+    }
+  } else if (boss.phase === 'missile_halt') {
+    // Halt briefly, aim turret at player, then unleash 360-degree homing missile ring
+    boss.vx *= 0.8;
+    boss.vy *= 0.8;
+    boss.angle = vectorToAngleDeg(dirX, dirY);
+
+    const launchAt = HALT_LAUNCH_DURATION * 0.55;
+    if (prevTimer > launchAt && boss.phaseTimer <= launchAt) {
+      boss.fireAnimTimer = BOSS_FIRE_ANIM_SEC;
+      const count = common.rampaging ? MISSILE_RING_COUNT + 4 : MISSILE_RING_COUNT;
+      spawned.push(...spawnHomingMissileRing(boss, player, count));
+      events.push({ type: 'sfx', sound: 'shoot', x: boss.x, y: boss.y });
+      events.push({ type: 'camera_shake', magnitude: 8, duration: 0.22 });
+    }
+
+    if (boss.phaseTimer <= 0) {
+      boss.phase = 'recover';
+      boss.phaseTimer = RECOVER_DURATION;
+    }
+  } else {
+    boss.vx *= 0.85;
+    boss.vy *= 0.85;
+    boss.angle = vectorToAngleDeg(dirX, dirY);
+    if (boss.phaseTimer <= 0) {
+      boss.phase = 'stalk';
+      boss.phaseTimer = STALK_DURATION;
+    }
+  }
+
+  resolveEnemyAgainstIsland(boss, island);
+
+  // Contact damage
+  const reach = boss.radius + player.radius;
+  const cdx = player.x - boss.x;
+  const cdy = player.y - boss.y;
+  if (cdx * cdx + cdy * cdy <= reach * reach) {
+    applyBossDamageToPlayer(player, CONTACT_DAMAGE, boss.x, boss.y, 260, events);
+  }
+
+  return spawned;
+}

@@ -464,6 +464,94 @@ function drawHero(
   }
 }
 
+/**
+ * TRON "REZ-In" vertical materialization beam: glowing neon grid pillar +
+ * rising horizontal scan ring + digital rez sparks.
+ */
+function drawRezInBeam(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  radius: number,
+  heightPx: number,
+  progress: number,
+  color: string,
+  elapsedTime: number,
+): void {
+  const clamped = Math.max(0, Math.min(1, progress));
+  const scanY = screenY - clamped * heightPx;
+  ctx.save();
+
+  // Vertical neon grid pillar
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.14 * (1 - clamped * 0.4);
+  ctx.fillRect(screenX - radius, screenY - heightPx, radius * 2, heightPx);
+
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1;
+  for (let gx = -radius; gx <= radius; gx += Math.max(6, radius * 0.5)) {
+    ctx.beginPath();
+    ctx.moveTo(screenX + gx, screenY - heightPx);
+    ctx.lineTo(screenX + gx, screenY);
+    ctx.stroke();
+  }
+
+  // Rising horizontal scan ring
+  ctx.globalAlpha = 0.95;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 14;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.ellipse(screenX, scanY, radius * 1.15, Math.max(4, radius * 0.35), 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Digital rez sparks along the scan ring
+  ctx.fillStyle = color;
+  for (let s = 0; s < 5; s++) {
+    const a = elapsedTime * 14 + s * 1.25;
+    const sx = screenX + Math.cos(a) * radius * 0.95;
+    const sy = scanY + Math.sin(a * 1.7) * 5;
+    ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+  }
+  ctx.restore();
+}
+
+/**
+ * Glowing weapon/eye muzzle flash for enemies & bosses when `fireAnimTimer > 0`.
+ */
+function drawFiringFlash(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  worldAngleDeg: number,
+  camAngleDeg: number,
+  offsetDist: number,
+  liftY: number,
+  color: string,
+  intensity: number,
+): void {
+  const rad = ((worldAngleDeg + camAngleDeg) * Math.PI) / 180;
+  // Approach B local UP (-Y, 0°) is forward: sin(rad), -cos(rad)
+  const fx = screenX + Math.sin(rad) * offsetDist;
+  const fy = screenY - liftY - Math.cos(rad) * offsetDist;
+  const r = 6 + intensity * 10;
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = Math.min(1, 0.55 + intensity * 0.45);
+  ctx.beginPath();
+  ctx.arc(fx, fy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.arc(fx, fy, r * 0.45, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawBoss(
   ctx: CanvasRenderingContext2D,
   boss: BossState,
@@ -474,20 +562,40 @@ function drawBoss(
   spacingPx: number,
   zScale: number,
   elapsedTime: number,
+  project: (wx: number, wy: number) => { x: number; y: number },
 ): void {
   const camAngle = camera.angleDeg;
   const zLift = boss.z * zScale;
+  const rezzing = (boss.rezTimer ?? 0) > 0;
+  const rezProg = rezzing
+    ? 1 - (boss.rezTimer ?? 0) / Math.max(0.01, boss.rezDuration ?? 1.0)
+    : 1;
+  const bossHeightPx = 150;
 
   // Ground shadow
   ctx.save();
   ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
   ctx.beginPath();
-  ctx.ellipse(screenX, screenY + 6, boss.radius * 0.9, boss.radius * 0.45, 0, 0, Math.PI * 2);
+  ctx.ellipse(screenX, screenY + 8, boss.radius * 0.95, boss.radius * 0.48, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 
+  ctx.save();
+  if (rezzing) {
+    // Progressive bottom-to-top reveal clip during TRON rez-in
+    const revealH = Math.max(2, bossHeightPx * rezProg);
+    ctx.beginPath();
+    ctx.rect(
+      screenX - boss.radius * 2.5,
+      screenY + 30 - revealH,
+      boss.radius * 5,
+      revealH + 40,
+    );
+    ctx.clip();
+  }
+
   if (boss.kind === 'maximilian') {
-    const scale = 3.2;
+    const scale = 4.8;
     drawStack(
       ctx,
       models.maximilian.body,
@@ -497,7 +605,7 @@ function drawBoss(
       camAngle,
       scale,
       zLift,
-      spacingPx * 1.3,
+      spacingPx * 1.5,
     );
     drawStack(
       ctx,
@@ -507,8 +615,8 @@ function drawBoss(
       boss.bladeAngle,
       camAngle,
       scale * 1.15,
-      zLift + 5 * spacingPx,
-      spacingPx,
+      zLift + 6 * spacingPx,
+      spacingPx * 1.2,
     );
     // Whirling blade danger halo
     ctx.save();
@@ -518,12 +626,10 @@ function drawBoss(
         : 'rgba(239, 68, 68, 0.35)';
     ctx.lineWidth = boss.phase === 'whirlwind' ? 3 : 1.5;
     ctx.beginPath();
-    ctx.arc(screenX, screenY - zLift - 8, boss.bladeRadius, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY - zLift - 12, boss.bladeRadius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
-    // Milestone 4.1 Fix 6: bright crimson/magenta energy shield ring makes it
-    // obvious why standard bolts are bouncing off the spinning blades.
     if (boss.phase !== 'recover' && (boss.shieldHp ?? 0) > 0) {
       const shieldFrac = (boss.shieldHp ?? 0) / Math.max(1, boss.shieldMaxHp ?? 1);
       const shimmer = 0.5 + 0.5 * Math.sin(elapsedTime * 9);
@@ -533,56 +639,70 @@ function drawBoss(
       ctx.strokeStyle = `rgba(244, 63, 94, ${(0.45 + shieldFrac * 0.4 + shimmer * 0.1).toFixed(2)})`;
       ctx.lineWidth = 3 + shieldFrac * 2;
       ctx.beginPath();
-      ctx.arc(screenX, screenY - zLift - 8, boss.bladeRadius + 7, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.strokeStyle = `rgba(255, 228, 230, ${(0.25 + shimmer * 0.35).toFixed(2)})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(screenX, screenY - zLift - 8, boss.bladeRadius + 11, 0, Math.PI * 2);
+      ctx.arc(screenX, screenY - zLift - 12, boss.bladeRadius + 7, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
 
-    // Pulsing exposed core telegraphs the fully-vulnerable recovery window.
     if (boss.phase === 'recover') {
       const pulse = 0.5 + 0.5 * Math.sin(elapsedTime * 16);
       ctx.save();
       ctx.strokeStyle = `rgba(255, 240, 120, ${(0.45 + pulse * 0.5).toFixed(2)})`;
       ctx.lineWidth = 2 + pulse * 2;
       ctx.beginPath();
-      ctx.arc(screenX, screenY - zLift - 14, 9 + pulse * 7, 0, Math.PI * 2);
+      ctx.arc(screenX, screenY - zLift - 18, 12 + pulse * 8, 0, Math.PI * 2);
       ctx.stroke();
       ctx.fillStyle = `rgba(254, 240, 138, ${(0.7 + pulse * 0.3).toFixed(2)})`;
-      ctx.font = 'bold 11px ui-monospace, monospace';
+      ctx.font = 'bold 12px ui-monospace, monospace';
       ctx.textAlign = 'center';
-      ctx.fillText('VULNERABLE!', screenX, screenY - zLift - 36);
+      ctx.fillText('VULNERABLE!', screenX, screenY - zLift - 52);
       ctx.restore();
     }
-    return;
-  }
-
-  if (boss.kind === 'recogniser') {
-    const scale = 3.2;
+  } else if (boss.kind === 'recogniser') {
+    // Milestone 4.11: 2-3x larger Recogniser with TWO distinct leg columns
+    const scale = 5.0;
     const leftLeg = boss.parts.find((p) => p.id === 'left_leg');
     const rightLeg = boss.parts.find((p) => p.id === 'right_leg');
     const headCore = boss.parts.find((p) => p.id === 'head_core');
 
-    // Legs: indices 0,2 map to left_leg; indices 1,3 map to right_leg
-    for (let i = 0; i < models.recogniser.legs.length; i++) {
-      const isLeft = i % 2 === 0;
-      const part = isLeft ? leftLeg : rightLeg;
-      if (part && part.destroyed) continue;
+    // Left leg [0] and Right leg [1]
+    if (!leftLeg || !leftLeg.destroyed) {
       drawStack(
         ctx,
-        models.recogniser.legs[i],
+        models.recogniser.legs[0],
         screenX,
         screenY,
         boss.angle,
         camAngle,
         scale,
         zLift,
-        spacingPx * 1.4,
+        spacingPx * 1.6,
       );
+    } else {
+      // Sparking destroyed left-leg socket
+      ctx.save();
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(screenX - 36 + Math.sin(elapsedTime * 35) * 4, screenY - zLift - 12, 6, 6);
+      ctx.restore();
+    }
+    if (!rightLeg || !rightLeg.destroyed) {
+      drawStack(
+        ctx,
+        models.recogniser.legs[1],
+        screenX,
+        screenY,
+        boss.angle,
+        camAngle,
+        scale,
+        zLift,
+        spacingPx * 1.6,
+      );
+    } else {
+      // Sparking destroyed right-leg socket
+      ctx.save();
+      ctx.fillStyle = '#f97316';
+      ctx.fillRect(screenX + 30 + Math.cos(elapsedTime * 35) * 4, screenY - zLift - 12, 6, 6);
+      ctx.restore();
     }
 
     drawStack(
@@ -593,56 +713,239 @@ function drawBoss(
       boss.angle,
       camAngle,
       scale,
-      zLift + 8 * spacingPx * 1.4,
-      spacingPx * 1.4,
+      zLift + 9 * spacingPx * 1.6,
+      spacingPx * 1.6,
     );
 
     if (headCore && headCore.vulnerable && !headCore.destroyed) {
       ctx.save();
       ctx.strokeStyle = '#f43f5e';
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(
         screenX,
-        screenY - zLift - 34,
-        18 + Math.sin(elapsedTime * 14) * 3,
+        screenY - zLift - 58,
+        24 + Math.sin(elapsedTime * 14) * 4,
         0,
         Math.PI * 2,
       );
       ctx.stroke();
       ctx.restore();
     }
-    return;
-  }
+  } else if (boss.kind === 'abb') {
+    const scale = 4.8;
+    drawStack(
+      ctx,
+      models.abb,
+      screenX,
+      screenY,
+      boss.angle,
+      camAngle,
+      scale,
+      zLift,
+      spacingPx * 1.5,
+    );
+  } else if (boss.kind === 'skullhead') {
+    const scale = 4.8;
+    drawStack(
+      ctx,
+      models.skullhead.body,
+      screenX,
+      screenY,
+      boss.angle,
+      camAngle,
+      scale,
+      zLift,
+      spacingPx * 1.5,
+    );
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    drawStack(
+      ctx,
+      models.skullhead.halo,
+      screenX,
+      screenY,
+      boss.bladeAngle,
+      camAngle,
+      scale * 1.25,
+      zLift + 8 * spacingPx * 1.5,
+      spacingPx,
+    );
+    ctx.restore();
 
-  // Evil Otto
-  const variant = boss.ottoVariant ?? 'classic';
-  const slices = models.evilOtto[variant] ?? models.evilOtto.classic;
-  const scale = 2.6 + (boss.radius - 26) * 0.05;
-  ctx.save();
-  if (boss.reconstructing) {
-    ctx.globalAlpha = 0.45 + 0.45 * Math.abs(Math.sin(elapsedTime * 18));
-  }
-  drawStack(
-    ctx,
-    slices,
-    screenX,
-    screenY,
-    boss.angle,
-    camAngle,
-    scale,
-    zLift,
-    spacingPx * 1.3,
-  );
-  if (boss.reconstructing) {
-    ctx.strokeStyle = '#fde047';
+    // Twin eye-laser telegraph targeting lines or active sweeping beams
+    const sweepRad = boss.laserSweepAngle ?? 0;
+    const camRad = (camAngle * Math.PI) / 180;
+    const screenRad = sweepRad + camRad;
+    const dirX = Math.cos(screenRad);
+    const dirY = Math.sin(screenRad);
+    const perpX = -dirY;
+    const perpY = dirX;
+    if ((boss.laserTelegraphTimer ?? 0) > 0) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(250, 204, 21, 0.75)';
+      ctx.setLineDash([6, 6]);
+      ctx.lineWidth = 2;
+      for (const side of [-1, 1]) {
+        const ox = screenX + perpX * side * 18;
+        const oy = screenY - zLift - 34 + perpY * side * 18;
+        ctx.beginPath();
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(ox + dirX * 520, oy + dirY * 520);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else if ((boss.laserActiveTimer ?? 0) > 0) {
+      ctx.save();
+      ctx.shadowColor = '#f59e0b';
+      ctx.shadowBlur = 18;
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 6;
+      for (const side of [-1, 1]) {
+        const ox = screenX + perpX * side * 18;
+        const oy = screenY - zLift - 34 + perpY * side * 18;
+        ctx.beginPath();
+        ctx.moveTo(ox, oy);
+        ctx.lineTo(ox + dirX * 540, oy + dirY * 540);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  } else if (boss.kind === 'bug_hive') {
+    const scale = 4.8;
+    drawStack(
+      ctx,
+      models.bugHive.hive,
+      screenX,
+      screenY,
+      boss.angle,
+      camAngle,
+      scale,
+      zLift,
+      spacingPx * 1.5,
+    );
+    // Draw orbiting & swooping Flying Bug Bots
+    const bugs = boss.orbitingBugs ?? [];
+    for (let i = 0; i < bugs.length; i++) {
+      const bug = bugs[i];
+      if (bug.hp <= 0) continue;
+      const bs = project(bug.x, bug.y);
+      const bugDeg = (bug.angle * 180) / Math.PI + 90;
+      drawStack(
+        ctx,
+        models.bugHive.bugBot,
+        bs.x,
+        bs.y,
+        bugDeg,
+        camAngle,
+        2.2,
+        16 * zScale,
+        spacingPx,
+      );
+    }
+  } else if (boss.kind === 'brainbot') {
+    const scale = 4.8;
+    drawStack(
+      ctx,
+      models.brainbot,
+      screenX,
+      screenY,
+      boss.angle,
+      camAngle,
+      scale,
+      zLift,
+      spacingPx * 1.5,
+    );
+    // Translucent cyan neural glass dome shimmer
+    ctx.save();
+    ctx.strokeStyle = 'rgba(103, 232, 249, 0.55)';
     ctx.lineWidth = 2;
-    ctx.setLineDash([5, 5]);
     ctx.beginPath();
-    ctx.arc(screenX, screenY - zLift - 12, boss.radius + 10, 0, Math.PI * 2);
+    ctx.arc(screenX, screenY - zLift - 34, 34, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
+  } else {
+    // Evil Otto (scaled up 2x+)
+    const variant = boss.ottoVariant ?? 'classic';
+    const slices = models.evilOtto[variant] ?? models.evilOtto.classic;
+    const scale = 4.5 + (boss.radius - 26) * 0.06;
+    if (boss.reconstructing) {
+      ctx.globalAlpha = 0.45 + 0.45 * Math.abs(Math.sin(elapsedTime * 18));
+    }
+    drawStack(
+      ctx,
+      slices,
+      screenX,
+      screenY,
+      boss.angle,
+      camAngle,
+      scale,
+      zLift,
+      spacingPx * 1.5,
+    );
+    if (boss.reconstructing) {
+      ctx.strokeStyle = '#fde047';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.arc(screenX, screenY - zLift - 18, boss.radius + 14, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
   ctx.restore();
+
+  // Boss firing flash
+  if ((boss.fireAnimTimer ?? 0) > 0 && !rezzing) {
+    const intensity = (boss.fireAnimTimer ?? 0) / 0.22;
+    drawFiringFlash(
+      ctx,
+      screenX,
+      screenY,
+      boss.angle,
+      camAngle,
+      boss.radius * 0.75,
+      zLift + 26,
+      boss.kind === 'brainbot' ? '#4ade80' : '#facc15',
+      intensity,
+    );
+  }
+
+  // Higher-sector multi-layer shield rings
+  if ((boss.shieldLayers ?? 0) > 0 && !rezzing) {
+    ctx.save();
+    const layers = boss.shieldLayers ?? 0;
+    for (let l = 0; l < layers; l++) {
+      ctx.strokeStyle = l === layers - 1 ? '#22d3ee' : 'rgba(56, 189, 248, 0.45)';
+      ctx.lineWidth = l === layers - 1 ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.arc(screenX, screenY - zLift - 20, boss.radius + 10 + l * 7, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Periodic Rampage Invulnerability pulsing golden/crimson aura
+  if ((boss.rampageTimer ?? 0) > 0 && !rezzing) {
+    const pulse = 0.5 + 0.5 * Math.sin(elapsedTime * 18);
+    ctx.save();
+    ctx.shadowColor = '#f59e0b';
+    ctx.shadowBlur = 24;
+    ctx.strokeStyle = pulse > 0.5 ? '#facc15' : '#ef4444';
+    ctx.lineWidth = 4 + pulse * 3;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY - zLift - 22, boss.radius + 18 + pulse * 6, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = '#fef08a';
+    ctx.font = 'bold 12px ui-monospace, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('RAMPAGE — INVULNERABLE!', screenX, screenY - zLift - boss.radius - 48);
+    ctx.restore();
+  }
+
+  // TRON Rez-In beam overlay for bosses
+  if (rezzing) {
+    drawRezInBeam(ctx, screenX, screenY, boss.radius * 1.15, bossHeightPx, rezProg, '#22d3ee', elapsedTime);
+  }
 }
 
 function drawProjectile(
@@ -663,6 +966,23 @@ function drawProjectile(
     ctx.translate(screenX, sy);
     ctx.rotate(angle);
     ctx.fillRect(-p.radius * 2, -p.radius * 0.55, p.radius * 4, p.radius * 1.1);
+  } else if (p.kind === 'electric_wave') {
+    // Crackling ground-hugging brain-electricity arc
+    const angle = Math.atan2(p.vy, p.vx);
+    ctx.translate(screenX, sy);
+    ctx.rotate(angle);
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-p.radius * 1.6, 0);
+    ctx.lineTo(-p.radius * 0.6, -6);
+    ctx.lineTo(0, 5);
+    ctx.lineTo(p.radius * 0.7, -5);
+    ctx.lineTo(p.radius * 1.6, 0);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
   } else if (p.kind === 'lightning') {
     ctx.strokeStyle = p.color;
     ctx.lineWidth = 2.5;
@@ -877,6 +1197,15 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
           '#22d3ee',
         );
       }
+      // ABB dodge-dash afterimage trail
+      if (state.boss && state.boss.kind === 'abb' && (state.boss.dashTimer ?? 0) > 0) {
+        vfx.afterimage(
+          state.boss.x,
+          state.boss.y,
+          (state.boss.angle * Math.PI) / 180,
+          '#f97316',
+        );
+      }
       if (state.player.muzzleFlash > 0.05) {
         const aimRad = (state.player.aimAngle * Math.PI) / 180;
         vfx.muzzleFlash(
@@ -981,17 +1310,81 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
         renderQueue.push({
           sortY: s.y,
           draw: (c) => {
-            if (e.kind === 'laser_shooter' && e.telegraphTimer > 0) {
+            const rezzing = (e.rezTimer ?? 0) > 0;
+            const rezProg = rezzing
+              ? 1 - (e.rezTimer ?? 0) / Math.max(0.01, e.rezDuration ?? 1.0)
+              : 1;
+            const firing = (e.fireAnimTimer ?? 0) > 0 && !rezzing;
+
+            if ((e.kind === 'laser_shooter' || e.kind === 'v_bot_laser') && e.telegraphTimer > 0 && !rezzing) {
               c.save();
-              c.strokeStyle = 'rgba(255, 42, 85, 0.75)';
+              c.strokeStyle =
+                e.kind === 'v_bot_laser'
+                  ? 'rgba(250, 204, 21, 0.78)'
+                  : 'rgba(255, 42, 85, 0.75)';
               c.lineWidth = 1.5;
               c.beginPath();
-              c.moveTo(s.x, s.y - 10);
+              c.moveTo(s.x, s.y - 12);
               c.lineTo(playerScreen.x, playerScreen.y - 10);
               c.stroke();
               c.restore();
             }
-            cache.drawCached(c, key, s.x, s.y, e.angle, camAngle, e.z * zScale);
+
+            // Barrel recoil kickback when firing
+            let drawX = s.x;
+            let drawY = s.y;
+            if (firing) {
+              const kick = ((e.fireAnimTimer ?? 0) / 0.22) * 3.5;
+              const rad = ((e.angle + camAngle) * Math.PI) / 180;
+              drawX -= Math.sin(rad) * kick;
+              drawY += Math.cos(rad) * kick;
+            }
+
+            c.save();
+            if (rezzing) {
+              const spriteH = 56;
+              const revealH = Math.max(2, spriteH * rezProg);
+              c.beginPath();
+              c.rect(s.x - 32, s.y + 12 - revealH, 64, revealH + 16);
+              c.clip();
+            }
+            cache.drawCached(c, key, drawX, drawY, e.angle, camAngle, e.z * zScale);
+            c.restore();
+
+            if (rezzing) {
+              drawRezInBeam(
+                c,
+                s.x,
+                s.y,
+                e.radius + 4,
+                56,
+                rezProg,
+                e.kind === 'v_bot_laser' || e.kind === 'grenadier' ? '#facc15' : '#22d3ee',
+                state.elapsedTime,
+              );
+            }
+
+            if (firing) {
+              const intensity = (e.fireAnimTimer ?? 0) / 0.22;
+              const flashColor =
+                e.kind === 'v_bot_laser'
+                  ? '#facc15'
+                  : e.kind === 'grenadier'
+                    ? '#f97316'
+                    : '#ff2a55';
+              drawFiringFlash(
+                c,
+                drawX,
+                drawY,
+                e.angle,
+                camAngle,
+                e.radius + 8,
+                14,
+                flashColor,
+                intensity,
+              );
+            }
+
             if (e.freezeTimer > 0) {
               c.save();
               c.strokeStyle = '#67e8f9';
@@ -1060,6 +1453,7 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
               spacingPx,
               zScale,
               state.elapsedTime,
+              project,
             ),
         });
       }

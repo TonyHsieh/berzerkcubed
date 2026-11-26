@@ -6,7 +6,12 @@ import type {
   PlayerState,
   Projectile,
 } from '../engine/types';
-import { applyBossDamageToPlayer, nextBossProjectileId } from './bossUtils';
+import {
+  applyBossDamageToPlayer,
+  BOSS_FIRE_ANIM_SEC,
+  nextBossProjectileId,
+  stepBossCommonTimers,
+} from './bossUtils';
 
 interface OttoVariantSpec {
   variant: OttoVariant;
@@ -305,13 +310,12 @@ export function updateEvilOtto(
   const spawned: Projectile[] = [];
   if (dt <= 0 || boss.hp <= 0) return spawned;
 
-  if (boss.hitFlash > 0) {
-    boss.hitFlash = Math.max(0, boss.hitFlash - dt);
-  }
+  const common = stepBossCommonTimers(boss, dt, events);
+  if (common.rezzing) return spawned;
 
   const spec = getSpecForVariant(boss.ottoVariant);
   const prevTimer = boss.phaseTimer;
-  boss.phaseTimer -= dt;
+  boss.phaseTimer -= dt * common.speedMult;
 
   const dx = player.x - boss.x;
   const dy = player.y - boss.y;
@@ -387,6 +391,7 @@ export function updateEvilOtto(
 
     // Fire Mega Man-style variant attack once near the start of the ability phase
     if (prevTimer > ABILITY_DURATION - 0.35 && boss.phaseTimer <= ABILITY_DURATION - 0.35) {
+      boss.fireAnimTimer = BOSS_FIRE_ANIM_SEC;
       spawned.push(...executeVariantAbility(boss, player, spec, events));
     }
 

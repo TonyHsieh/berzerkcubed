@@ -97,11 +97,13 @@ export function createHud(
       <div id="hud-boss-bar" style="height:100%;width:100%;background:linear-gradient(90deg,#ef4444,#f97316);"></div>
     </div>
     <div id="hud-boss-shield-row" style="display:none;font-size:10px;color:#22d3ee;margin-bottom:4px;">
-      BLADE SHIELD <span id="hud-boss-shield-val">0 / 0</span>
+      SHIELD <span id="hud-boss-shield-val">0 / 0</span>
     </div>
-    <div id="hud-boss-shield-track" style="display:none;height:7px;background:#08202a;border:1px solid #22d3ee;margin-bottom:6px;">
+    <div id="hud-boss-shield-track" style="display:none;height:7px;background:#08202a;border:1px solid #22d3ee;margin-bottom:6px;position:relative;overflow:hidden;">
       <div id="hud-boss-shield-bar" style="height:100%;width:100%;background:linear-gradient(90deg,#0ea5e9,#fb923c);"></div>
     </div>
+    <div id="hud-boss-shield-layers" style="display:none;gap:4px;margin-bottom:6px;"></div>
+    <div id="hud-boss-rampage" style="display:none;font-size:12px;font-weight:bold;color:#fef08a;background:rgba(180,30,30,0.65);border:1px solid #facc15;padding:3px 6px;text-align:center;letter-spacing:2px;text-shadow:0 0 10px #f59e0b;margin-bottom:6px;">RAMPAGE — INVULNERABLE!</div>
     <div id="hud-boss-vulnerable" style="display:none;font-size:12px;color:#fef08a;text-align:center;letter-spacing:3px;text-shadow:0 0 10px #facc15;margin-bottom:4px;">VULNERABLE!</div>
     <div id="hud-boss-parts" style="font-size:10px;color:#fca5a5;display:flex;gap:8px;flex-wrap:wrap;"></div>
   `;
@@ -168,6 +170,10 @@ export function createHud(
       <button id="spawn-max" style="background:#7f1d1d;color:#fff;border:1px solid #ef4444;padding:4px 6px;font:inherit;font-size:10px;cursor:pointer;">Maximilian</button>
       <button id="spawn-rec" style="background:#164e63;color:#fff;border:1px solid #22d3ee;padding:4px 6px;font:inherit;font-size:10px;cursor:pointer;">Recogniser</button>
       <button id="spawn-otto" style="background:#713f12;color:#fff;border:1px solid #fde047;padding:4px 6px;font:inherit;font-size:10px;cursor:pointer;">Evil Otto</button>
+      <button id="spawn-abb" style="background:#475569;color:#fff;border:1px solid #f97316;padding:4px 6px;font:inherit;font-size:10px;cursor:pointer;">ABB</button>
+      <button id="spawn-skullhead" style="background:#115e59;color:#fff;border:1px solid #facc15;padding:4px 6px;font:inherit;font-size:10px;cursor:pointer;">Skullhead</button>
+      <button id="spawn-bughive" style="background:#1e3a8a;color:#fff;border:1px solid #22d3ee;padding:4px 6px;font:inherit;font-size:10px;cursor:pointer;">Bug Hive</button>
+      <button id="spawn-brainbot" style="background:#14532d;color:#fff;border:1px solid #4ade80;padding:4px 6px;font:inherit;font-size:10px;cursor:pointer;">Brainbot</button>
     </div>
   `;
   container.appendChild(tuningPanel);
@@ -203,6 +209,8 @@ export function createHud(
   const bossShieldTrackEl = $<HTMLDivElement>('hud-boss-shield-track');
   const bossShieldValEl = $<HTMLSpanElement>('hud-boss-shield-val');
   const bossShieldBarEl = $<HTMLDivElement>('hud-boss-shield-bar');
+  const bossShieldLayersEl = $<HTMLDivElement>('hud-boss-shield-layers');
+  const bossRampageEl = $<HTMLDivElement>('hud-boss-rampage');
   const bossVulnerableEl = $<HTMLDivElement>('hud-boss-vulnerable');
   const bossPartsEl = $<HTMLDivElement>('hud-boss-parts');
   const sectorEl = $<HTMLDivElement>('hud-sector');
@@ -228,6 +236,10 @@ export function createHud(
   const spawnMaxBtn = $<HTMLButtonElement>('spawn-max');
   const spawnRecBtn = $<HTMLButtonElement>('spawn-rec');
   const spawnOttoBtn = $<HTMLButtonElement>('spawn-otto');
+  const spawnAbbBtn = $<HTMLButtonElement>('spawn-abb');
+  const spawnSkullheadBtn = $<HTMLButtonElement>('spawn-skullhead');
+  const spawnBugHiveBtn = $<HTMLButtonElement>('spawn-bughive');
+  const spawnBrainbotBtn = $<HTMLButtonElement>('spawn-brainbot');
   const finalScoreEl = $<HTMLDivElement>('hud-final-score');
   const restartBtn = $<HTMLButtonElement>('hud-restart');
 
@@ -276,6 +288,10 @@ export function createHud(
   spawnMaxBtn.addEventListener('click', () => callbacks.onSpawnBoss?.('maximilian'));
   spawnRecBtn.addEventListener('click', () => callbacks.onSpawnBoss?.('recogniser'));
   spawnOttoBtn.addEventListener('click', () => callbacks.onSpawnBoss?.('evil_otto'));
+  spawnAbbBtn.addEventListener('click', () => callbacks.onSpawnBoss?.('abb'));
+  spawnSkullheadBtn.addEventListener('click', () => callbacks.onSpawnBoss?.('skullhead'));
+  spawnBugHiveBtn.addEventListener('click', () => callbacks.onSpawnBoss?.('bug_hive'));
+  spawnBrainbotBtn.addEventListener('click', () => callbacks.onSpawnBoss?.('brainbot'));
 
   return {
     update(state: GameState): void {
@@ -352,16 +368,30 @@ export function createHud(
         bossHpEl.textContent = `${Math.ceil(b.hp)} / ${b.maxHp}`;
         bossBarEl.style.width = `${Math.max(0, Math.min(100, (b.hp / Math.max(1, b.maxHp)) * 100))}%`;
 
-        // Milestone 4.1 Fix 6: blade-shield meter + clear vulnerability tell.
+        // Milestone 4.11: blade-shield or higher-sector multi-layer segmented shields + Rampage banner
         const shieldMax = b.shieldMaxHp ?? 0;
-        const hasShield = shieldMax > 0;
+        const maxLayers = b.maxShieldLayers ?? 0;
+        const curLayers = b.shieldLayers ?? 0;
+        const hasShield = shieldMax > 0 || maxLayers > 0;
         bossShieldRowEl.style.display = hasShield ? 'block' : 'none';
         bossShieldTrackEl.style.display = hasShield ? 'block' : 'none';
         if (hasShield) {
-          bossShieldValEl.textContent = `${Math.ceil(b.shieldHp ?? 0)} / ${shieldMax}`;
-          bossShieldBarEl.style.width = `${Math.max(0, Math.min(100, ((b.shieldHp ?? 0) / shieldMax) * 100))}%`;
+          const layerSuffix = maxLayers > 0 ? ` · LAYERS ${curLayers}/${maxLayers}` : '';
+          bossShieldValEl.textContent = `${Math.ceil(b.shieldHp ?? 0)} / ${shieldMax}${layerSuffix}`;
+          bossShieldBarEl.style.width = `${Math.max(0, Math.min(100, ((b.shieldHp ?? 0) / Math.max(1, shieldMax)) * 100))}%`;
         }
-        bossVulnerableEl.style.display = b.vulnerable ? 'block' : 'none';
+        if (maxLayers > 0) {
+          bossShieldLayersEl.style.display = 'flex';
+          bossShieldLayersEl.innerHTML = Array.from({ length: maxLayers }, (_, idx) => {
+            const active = idx < curLayers;
+            const bg = active ? '#22d3ee' : '#1e293b';
+            return `<div style="flex:1;height:5px;background:${bg};border:1px solid #0284c7;"></div>`;
+          }).join('');
+        } else {
+          bossShieldLayersEl.style.display = 'none';
+        }
+        bossRampageEl.style.display = (b.rampageTimer ?? 0) > 0 ? 'block' : 'none';
+        bossVulnerableEl.style.display = b.vulnerable && (b.rampageTimer ?? 0) <= 0 ? 'block' : 'none';
 
         if (b.parts.length > 1) {
           bossPartsEl.innerHTML = b.parts
