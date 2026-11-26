@@ -22,8 +22,13 @@ import {
 const PLAYER_MOVE_SPEED = 230;
 const DODGE_ROLL_SPEED = 470;
 const ELECTRIFIED_WALL_DAMAGE = 20;
-const RESURRECT_INVULN_SEC = 2.0;
 const SAFE_EDGE_MARGIN = 34;
+
+export const HERO_DEATH_DURATION = 0.85;
+export const HERO_REZ_DURATION = 1.0;
+export const HERO_POST_REZ_INVULN = 0.5;
+export const HERO_TELEFRAG_RADIUS = 64;
+export const HERO_DEATH_PARTICLE_COUNT = 54;
 
 function normalizeAngleDeg(deg: number): number {
   return ((deg % 360) + 360) % 360;
@@ -63,6 +68,10 @@ export function createPlayer(
     invulnTimer: 0,
     lastSafeX: x,
     lastSafeY: y,
+    deathTimer: 0,
+    rezTimer: 0,
+    rezDuration: HERO_REZ_DURATION,
+    rezHaloTimer: 0,
     recoil: 0,
     muzzleFlash: 0,
     weapon,
@@ -73,7 +82,91 @@ export function createPlayer(
 }
 
 export function isPlayerInvulnerable(player: PlayerState): boolean {
-  return player.dodgeTimer > 0 || player.invulnTimer > 0;
+  return (
+    player.dodgeTimer > 0 ||
+    player.invulnTimer > 0 ||
+    (player.deathTimer ?? 0) > 0 ||
+    (player.rezTimer ?? 0) > 0
+  );
+}
+
+/**
+ * Clamps a world coordinate onto safe walkable island floor inside `island.bounds`.
+ */
+export function clampToSafeIslandFloor(
+  x: number,
+  y: number,
+  island: PlatformIsland,
+): { x: number; y: number } {
+  const b = island.bounds;
+  const margin = Math.min(SAFE_EDGE_MARGIN, b.w * 0.25, b.h * 0.25);
+  return {
+    x: Math.max(b.x + margin, Math.min(b.x + b.w - margin, x)),
+    y: Math.max(b.y + margin, Math.min(b.y + b.h - margin, y)),
+  };
+}
+
+/**
+ * Milestone 4.12: Resets the hero completely back to default loadout on respawn
+ * (full HP & shield, starter Pulse Rifle Lv1 in Slot 1, empty Slots 2–3,
+ * 0 modifiers, 0 orbitals).
+ */
+export function resetPlayerLoadout(
+  player: PlayerState,
+  config: DifficultyConfig,
+): void {
+  const starter = createStarterWeapon();
+  player.maxHp = config.playerMaxHp;
+  player.hp = config.playerMaxHp;
+  player.maxShield = config.playerMaxShield;
+  player.shield = config.playerMaxShield;
+  player.shieldRegenDelay = 0;
+  player.weapon = starter;
+  player.weaponSlots = [starter, null, null];
+  player.activeSlot = 0;
+  player.orbitals = [];
+  player.vx = 0;
+  player.vy = 0;
+  player.z = 0;
+  player.dodgeTimer = 0;
+  player.dodgeCooldown = 0;
+  player.recoil = 0;
+  player.muzzleFlash = 0;
+}
+
+/**
+ * Milestone 4.12: Starts the hero death explosion (`deathTimer = 0.85s`) with
+ * a dense shower of bright red/crimson voxel particles, camera shake, and explosion SFX.
+ */
+export function triggerHeroDeath(
+  player: PlayerState,
+  events: GameEvent[],
+  deathX?: number,
+  deathY?: number,
+): void {
+  if ((player.deathTimer ?? 0) > 0) return;
+  player.hp = 0;
+  player.shield = 0;
+  player.vx = 0;
+  player.vy = 0;
+  player.dodgeTimer = 0;
+  player.deathTimer = HERO_DEATH_DURATION;
+  player.rezTimer = 0;
+  player.deathX = deathX ?? player.x;
+  player.deathY = deathY ?? player.y;
+
+  events.push(
+    {
+      type: 'vfx_explosion',
+      x: player.x,
+      y: player.y,
+      z: 12,
+      color: '#ff1e38',
+      count: HERO_DEATH_PARTICLE_COUNT,
+    },
+    { type: 'sfx', sound: 'explosion', x: player.x, y: player.y },
+    { type: 'camera_shake', magnitude: 14, duration: 0.4 },
+  );
 }
 
 export function damagePlayer(
@@ -108,19 +201,8 @@ export function damagePlayer(
     { type: 'camera_shake', magnitude: 5, duration: 0.14 },
   );
 
-  if (player.hp <= 0 && player.lives > 0) {
-    player.lives -= 1;
-    player.hp = player.maxHp;
-    player.shield = player.maxShield;
-    player.invulnTimer = RESURRECT_INVULN_SEC;
-    events.push({
-      type: 'vfx_explosion',
-      x: player.x,
-      y: player.y,
-      z: 10,
-      color: '#38bdf8',
-      count: 18,
-    });
+  if (player.hp <= 0) {
+    triggerHeroDeath(player, events);
   }
 
   return true;
@@ -196,6 +278,13 @@ export function updatePlayer(
   viewport?: { width: number; height: number },
 ): Projectile[] {
   if (dt <= 0) return [];
+
+  // Milestone 4.12: Hero cannot move or shoot while exploding or rezzing in.
+  if ((player.deathTimer ?? 0) > 0 || (player.rezTimer ?? 0) > 0) {
+    player.vx = 0;
+    player.vy = 0;
+    return [];
+  }
 
   // 1. Update timers
   if (player.dodgeTimer > 0) player.dodgeTimer = Math.max(0, player.dodgeTimer - dt);
@@ -308,34 +397,52 @@ export function updatePlayer(
   if (collision.fellOffEdge) {
     events.push(
       { type: 'player_fell', x: player.x, y: player.y },
+      {
+        type: 'vfx_explosion',
+        x: player.x,
+        y: player.y,
+        z: 10,
+        color: '#ff1e38',
+        count: HERO_DEATH_PARTICLE_COUNT,
+      },
       { type: 'sfx', sound: 'explosion', x: player.x, y: player.y },
       { type: 'camera_shake', magnitude: 9, duration: 0.28 },
     );
 
     player.lives = Math.max(0, player.lives - 1);
 
-    // Resurrect near last safe edge position, nudged slightly inward toward island center
+    // Resurrect on safe walkable island floor near last safe edge position, nudged inward
     const centerX = island.bounds.x + island.bounds.w * 0.5;
     const centerY = island.bounds.y + island.bounds.h * 0.5;
     const toCenterX = centerX - player.lastSafeX;
     const toCenterY = centerY - player.lastSafeY;
     const toCenterMag = Math.hypot(toCenterX, toCenterY);
     const nudge = 24;
-
-    player.x =
+    const rawSafeX =
       toCenterMag > 1
         ? player.lastSafeX + (toCenterX / toCenterMag) * nudge
         : centerX;
-    player.y =
+    const rawSafeY =
       toCenterMag > 1
         ? player.lastSafeY + (toCenterY / toCenterMag) * nudge
         : centerY;
-    player.z = 0;
-    player.vx = 0;
-    player.vy = 0;
-    player.dodgeTimer = 0;
-    player.shield = player.maxShield;
-    player.invulnTimer = RESURRECT_INVULN_SEC;
+    const safe = clampToSafeIslandFloor(rawSafeX, rawSafeY, island);
+
+    resetPlayerLoadout(player, config);
+    player.x = safe.x;
+    player.y = safe.y;
+    player.lastSafeX = safe.x;
+    player.lastSafeY = safe.y;
+    if (player.lives > 0) {
+      player.rezTimer = HERO_REZ_DURATION;
+      player.rezDuration = HERO_REZ_DURATION;
+      player.invulnTimer = HERO_REZ_DURATION + HERO_POST_REZ_INVULN;
+      events.push({ type: 'sfx', sound: 'rez_in', x: player.x, y: player.y });
+    } else {
+      player.hp = 0;
+      player.invulnTimer = HERO_POST_REZ_INVULN;
+    }
+    return [];
   } else {
     // Track last safe position when comfortably inside the island bounds
     const b = island.bounds;

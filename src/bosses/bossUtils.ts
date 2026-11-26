@@ -127,7 +127,13 @@ export function applyBossDamageToPlayer(
   knockbackSpeed: number,
   events: GameEvent[],
 ): boolean {
-  if (player.dodgeTimer > 0 || player.invulnTimer > 0 || damage <= 0) {
+  if (
+    player.dodgeTimer > 0 ||
+    player.invulnTimer > 0 ||
+    (player.deathTimer ?? 0) > 0 ||
+    (player.rezTimer ?? 0) > 0 ||
+    damage <= 0
+  ) {
     return false;
   }
 

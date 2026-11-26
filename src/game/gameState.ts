@@ -40,9 +40,15 @@ import { updateOrbitals } from '../entities/orbitals';
 import {
   applyDodgeShove,
   applyPowerUp,
+  clampToSafeIslandFloor,
   createPlayer,
   damagePlayer,
+  HERO_POST_REZ_INVULN,
+  HERO_REZ_DURATION,
+  HERO_TELEFRAG_RADIUS,
   isPlayerInvulnerable,
+  resetPlayerLoadout,
+  triggerHeroDeath,
   updatePlayer,
 } from '../entities/player';
 import {
@@ -73,6 +79,9 @@ const MINE_BLAST_RADIUS = 64;
 const LIGHTNING_CHAIN_RANGE = 180;
 const WAVE_INTERVAL_SEC = 5.5;
 const INITIAL_WAVE_DELAY_SEC = 0.5;
+const POST_REZ_HALO_SEC = 0.15;
+const TELEFRAG_BOSS_DAMAGE = 120;
+const TELEFRAG_BOSS_KNOCKBACK = 320;
 
 export interface GameState {
   island: PlatformIsland;
@@ -695,6 +704,197 @@ function resolveHostileProjectilesVsPlayer(
   }
 }
 
+export interface TelefragResult {
+  enemiesDestroyed: number;
+  projectilesCleared: number;
+  bossHit: boolean;
+}
+
+/**
+ * Milestone 4.12: Instantly destroys every non-boss enemy and hostile projectile
+ * overlapping `radius` around `(x, y)` in a burst of sparks, and knocks back /
+ * damages any overlapping boss so the hero never respawns trapped.
+ */
+export function telefragTargets(
+  x: number,
+  y: number,
+  radius: number,
+  enemies: EnemyState[],
+  enemyProjectiles: Projectile[],
+  bossProjectiles: Projectile[],
+  boss: BossState | null,
+  events: GameEvent[],
+): TelefragResult {
+  let enemiesDestroyed = 0;
+  let projectilesCleared = 0;
+  let bossHit = false;
+
+  for (let i = 0; i < enemies.length; i++) {
+    const e = enemies[i];
+    if (e.hp <= 0) continue;
+    const hitDist = radius + e.radius;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    if (dx * dx + dy * dy <= hitDist * hitDist) {
+      e.hp = 0;
+      enemiesDestroyed += 1;
+      events.push({
+        type: 'vfx_explosion',
+        x: e.x,
+        y: e.y,
+        z: 10,
+        color: '#38bdf8',
+        count: 10,
+      });
+    }
+  }
+
+  const clearProjectiles = (list: Projectile[]) => {
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
+      if (p.life <= 0) continue;
+      const hitDist = radius + p.radius;
+      const dx = p.x - x;
+      const dy = p.y - y;
+      if (dx * dx + dy * dy <= hitDist * hitDist) {
+        p.life = 0;
+        projectilesCleared += 1;
+      }
+    }
+  };
+  clearProjectiles(enemyProjectiles);
+  clearProjectiles(bossProjectiles);
+
+  if (boss && boss.hp > 0) {
+    const hitDist = radius + boss.radius;
+    const dx = boss.x - x;
+    const dy = boss.y - y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq <= hitDist * hitDist) {
+      bossHit = true;
+      const dist = Math.sqrt(distSq);
+      const nx = dist > 1e-4 ? dx / dist : 1;
+      const ny = dist > 1e-4 ? dy / dist : 0;
+      boss.vx += nx * TELEFRAG_BOSS_KNOCKBACK;
+      boss.vy += ny * TELEFRAG_BOSS_KNOCKBACK;
+      boss.x += nx * Math.max(0, hitDist - dist + 16);
+      boss.y += ny * Math.max(0, hitDist - dist + 16);
+      boss.hitFlash = 0.2;
+      if ((boss.rezTimer ?? 0) <= 0 && !boss.reconstructing) {
+        boss.hp = Math.max(1, boss.hp - TELEFRAG_BOSS_DAMAGE);
+      }
+      events.push({
+        type: 'vfx_explosion',
+        x: boss.x,
+        y: boss.y,
+        z: 16,
+        color: '#facc15',
+        count: 18,
+      });
+    }
+  }
+
+  events.push(
+    {
+      type: 'vfx_explosion',
+      x,
+      y,
+      z: 12,
+      color: '#22d3ee',
+      count: 24,
+    },
+    { type: 'sfx', sound: 'slam_impact', x, y },
+    { type: 'camera_shake', magnitude: 9, duration: 0.25 },
+  );
+
+  return { enemiesDestroyed, projectilesCleared, bossHit };
+}
+
+/**
+ * Milestone 4.12: Pure reducer advancing the hero death explosion -> full loadout
+ * reset -> Rez-In teleport invulnerability -> telefrag materialization flow.
+ */
+export function stepHeroDeath(
+  state: GameState,
+  dt: number,
+): 'alive' | 'dying' | 'rezzing' | 'game_over' {
+  const player = state.player;
+
+  if ((player.rezHaloTimer ?? 0) > 0) {
+    player.rezHaloTimer = Math.max(0, (player.rezHaloTimer ?? 0) - dt);
+  }
+
+  if (
+    player.hp <= 0 &&
+    (player.deathTimer ?? 0) <= 0 &&
+    (player.rezTimer ?? 0) <= 0 &&
+    !state.gameOver
+  ) {
+    triggerHeroDeath(player, state.events);
+  }
+
+  if ((player.deathTimer ?? 0) > 0) {
+    player.deathTimer = Math.max(0, (player.deathTimer ?? 0) - dt);
+    player.vx = 0;
+    player.vy = 0;
+
+    if (player.deathTimer <= 0) {
+      if (player.lives <= 1) {
+        player.lives = 0;
+        state.gameOver = true;
+        return 'game_over';
+      }
+      // Decrement lives and fully reset loadout at the exact (clamped) death position
+      player.lives -= 1;
+      const safe = clampToSafeIslandFloor(
+        player.deathX ?? player.x,
+        player.deathY ?? player.y,
+        state.island,
+      );
+      resetPlayerLoadout(player, state.config);
+      player.x = safe.x;
+      player.y = safe.y;
+      player.lastSafeX = safe.x;
+      player.lastSafeY = safe.y;
+      player.rezTimer = HERO_REZ_DURATION;
+      player.rezDuration = HERO_REZ_DURATION;
+      player.invulnTimer = HERO_REZ_DURATION + HERO_POST_REZ_INVULN;
+      state.events.push({ type: 'sfx', sound: 'rez_in', x: player.x, y: player.y });
+      return 'rezzing';
+    }
+    return 'dying';
+  }
+
+  if ((player.rezTimer ?? 0) > 0) {
+    player.rezTimer = Math.max(0, (player.rezTimer ?? 0) - dt);
+    player.vx = 0;
+    player.vy = 0;
+    player.invulnTimer = Math.max(
+      player.invulnTimer,
+      player.rezTimer + HERO_POST_REZ_INVULN,
+    );
+
+    if (player.rezTimer <= 0) {
+      player.rezHaloTimer = POST_REZ_HALO_SEC;
+      player.invulnTimer = Math.max(player.invulnTimer, HERO_POST_REZ_INVULN);
+      telefragTargets(
+        player.x,
+        player.y,
+        HERO_TELEFRAG_RADIUS,
+        state.enemies,
+        state.enemyProjectiles,
+        state.bossProjectiles,
+        state.boss,
+        state.events,
+      );
+      return 'alive';
+    }
+    return 'rezzing';
+  }
+
+  return 'alive';
+}
+
 /**
  * Pure headless fixed-timestep simulation step (no DOM/Canvas globals).
  * Advances the entire BERZERK³ world by one clamped step `dt` (typically 1/60s).
@@ -722,9 +922,19 @@ export function stepGameState(
     if (state.toast.life <= 0) state.toast = null;
   }
 
+  // Milestone 4.12: Step hero death explosion / rez-in teleport / telefrag state machine
+  const heroLifePhase = stepHeroDeath(state, clampedDt);
+  if (heroLifePhase === 'game_over') {
+    updateCamera(state.camera, state.player, input, clampedDt);
+    return state;
+  }
+  const heroActive = heroLifePhase === 'alive';
+
   // Milestone 4: 1/2/3 direct-select and LB/RB / mouse-wheel slot cycling.
-  if (input.slotSelect >= 0) selectWeaponSlot(state.player, input.slotSelect);
-  if (input.slotCycle !== 0) cycleWeaponSlot(state.player, input.slotCycle);
+  if (heroActive) {
+    if (input.slotSelect >= 0) selectWeaponSlot(state.player, input.slotSelect);
+    if (input.slotCycle !== 0) cycleWeaponSlot(state.player, input.slotCycle);
+  }
 
   // 1. World simulation (sliding doors, temporary bridges, crate hitFlash decay)
   updateWorld(state.island, state.elapsedTime, clampedDt);
@@ -753,7 +963,7 @@ export function stepGameState(
     state.playerProjectiles.push(...playerFired);
   }
 
-  if (state.player.dodgeTimer > 0) {
+  if (heroActive && state.player.dodgeTimer > 0) {
     applyDodgeShove(state.player, state.enemies, state.config);
   }
 
@@ -761,19 +971,21 @@ export function stepGameState(
   updateCamera(state.camera, state.player, input, clampedDt);
 
   // 5. Orbitals update (can intercept both enemy & boss projectiles)
-  const hostileView: Projectile[] =
-    state.bossProjectiles.length > 0
-      ? [...state.enemyProjectiles, ...state.bossProjectiles]
-      : state.enemyProjectiles;
-  const droneShots = updateOrbitals(
-    state.player,
-    state.enemies,
-    hostileView,
-    clampedDt,
-    state.events,
-  );
-  if (droneShots.length > 0) {
-    state.playerProjectiles.push(...droneShots);
+  if (heroActive) {
+    const hostileView: Projectile[] =
+      state.bossProjectiles.length > 0
+        ? [...state.enemyProjectiles, ...state.bossProjectiles]
+        : state.enemyProjectiles;
+    const droneShots = updateOrbitals(
+      state.player,
+      state.enemies,
+      hostileView,
+      clampedDt,
+      state.events,
+    );
+    if (droneShots.length > 0) {
+      state.playerProjectiles.push(...droneShots);
+    }
   }
 
   // 6. Wave spawning & sector boss trigger
@@ -821,6 +1033,16 @@ export function stepGameState(
   }
 
   // 7. Enemy AI updates (200+ melee Enforcers + 50-100 Shooters/Grenadiers)
+  // Track which enemies were rezzing before this tick so we can trigger the 0.15s post-rez halo.
+  const enemyWasRezzing = new Set<string>();
+  for (let i = 0; i < state.enemies.length; i++) {
+    const e = state.enemies[i];
+    if ((e.rezTimer ?? 0) > 0) enemyWasRezzing.add(e.id);
+    if ((e.rezHaloTimer ?? 0) > 0) {
+      e.rezHaloTimer = Math.max(0, (e.rezHaloTimer ?? 0) - clampedDt);
+    }
+  }
+
   updateEnforcers(
     state.enemies,
     state.player,
@@ -840,6 +1062,13 @@ export function stepGameState(
   );
   if (rangedFired.length > 0) {
     state.enemyProjectiles.push(...rangedFired);
+  }
+
+  for (let i = 0; i < state.enemies.length; i++) {
+    const e = state.enemies[i];
+    if (enemyWasRezzing.has(e.id) && (e.rezTimer ?? 0) <= 0) {
+      e.rezHaloTimer = POST_REZ_HALO_SEC;
+    }
   }
 
   // Enemy world hazards (electrified walls / open-edge falls) & melee contact
@@ -901,6 +1130,10 @@ export function stepGameState(
 
   // 9. Active boss update
   if (state.boss && state.boss.hp > 0) {
+    const bossWasRezzing = (state.boss.rezTimer ?? 0) > 0;
+    if ((state.boss.rezHaloTimer ?? 0) > 0) {
+      state.boss.rezHaloTimer = Math.max(0, (state.boss.rezHaloTimer ?? 0) - clampedDt);
+    }
     if (state.boss.kind === 'maximilian') {
       updateMaximilian(
         state.boss,
@@ -979,6 +1212,9 @@ export function stepGameState(
         state.bossProjectiles.push(...brainFired);
       }
     }
+    if (bossWasRezzing && (state.boss.rezTimer ?? 0) <= 0) {
+      state.boss.rezHaloTimer = POST_REZ_HALO_SEC;
+    }
   }
 
   // 10. Advance all projectiles
@@ -1042,6 +1278,8 @@ export function stepGameState(
   let nearestWeapon: PowerUpPickup | null = null;
   let nearestWeaponDistSq = Infinity;
   const collectDist = state.player.radius + PICKUP_COLLECT_RADIUS;
+  const canInteract =
+    (state.player.deathTimer ?? 0) <= 0 && (state.player.rezTimer ?? 0) <= 0;
   for (let i = 0; i < state.pickups.length; i++) {
     const pickup = state.pickups[i];
     pickup.life -= clampedDt;
@@ -1050,7 +1288,7 @@ export function stepGameState(
     const dx = state.player.x - pickup.x;
     const dy = state.player.y - pickup.y;
     const distSq = dx * dx + dy * dy;
-    const inRange = distSq <= collectDist * collectDist;
+    const inRange = canInteract && distSq <= collectDist * collectDist;
 
     if (pickup.kind === 'weapon') {
       const weaponType = pickup.weaponType;
@@ -1100,7 +1338,7 @@ export function stepGameState(
   state.nearbyWeaponPickup = nearestWeapon;
 
   // 14b. [F] near a dropped weapon: level up, equip, or swap the active slot.
-  const swapWeaponType = state.nearbyWeaponPickup?.weaponType;
+  const swapWeaponType = canInteract ? state.nearbyWeaponPickup?.weaponType : undefined;
   if (input.swapPressed && swapWeaponType) {
     const drop = state.nearbyWeaponPickup!;
     const outcome = applyWeaponPickupToSlots(state.player, swapWeaponType);
@@ -1140,8 +1378,22 @@ export function stepGameState(
   state.enemyProjectiles = state.enemyProjectiles.filter((p) => p.life > 0);
   state.bossProjectiles = state.bossProjectiles.filter((p) => p.life > 0);
 
-  // 16. Game-over check
-  if (state.player.hp <= 0 && state.player.lives <= 0) {
+  // 16. Trigger hero death explosion immediately if HP hit 0 this tick (e.g. from boss contact)
+  if (
+    state.player.hp <= 0 &&
+    (state.player.deathTimer ?? 0) <= 0 &&
+    (state.player.rezTimer ?? 0) <= 0 &&
+    !state.gameOver
+  ) {
+    triggerHeroDeath(state.player, state.events);
+  }
+
+  // Game-over check (only after death explosion timer completes on final life)
+  if (
+    state.player.hp <= 0 &&
+    state.player.lives <= 0 &&
+    (state.player.deathTimer ?? 0) <= 0
+  ) {
     state.gameOver = true;
   }
 

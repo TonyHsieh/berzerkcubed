@@ -10,7 +10,18 @@ import {
   SAFE_SPAWN_CLEARANCE,
   spawnHordeWave,
 } from '../enemies/spawner';
-import { applyWeaponPickupToSlots } from '../entities/weapons';
+import { addOrbital } from '../entities/orbitals';
+import {
+  damagePlayer,
+  HERO_DEATH_DURATION,
+  HERO_DEATH_PARTICLE_COUNT,
+  HERO_REZ_DURATION,
+  HERO_TELEFRAG_RADIUS,
+} from '../entities/player';
+import {
+  applyModifierPickup,
+  applyWeaponPickupToSlots,
+} from '../entities/weapons';
 import { createCrate } from '../world/crate';
 import {
   createGameState,
@@ -563,5 +574,155 @@ describe('Milestone 4.11 — Rez-In Protection & New Bosses Integration', () => 
       }
       expect(Number.isFinite(boss.x) && Number.isFinite(boss.y)).toBe(true);
     }
+  });
+});
+
+describe('Milestone 4.12 — Hero Death Explosion, Full Loadout Reset & Telefrag Rez-In', () => {
+  it('explodes in red dots, freezes input during deathTimer, resets loadout at death pos, stays invulnerable during rezTimer, and telefrags overlapping hostiles', () => {
+    const config = createDifficultyConfig();
+    const state = createGameStateForSector(0, config);
+    state.enemies.length = 0;
+    state.waveIndex = state.wavesPerSector;
+    state.bossSpawned = true;
+
+    const player = state.player;
+    player.lives = 3;
+    const deathX = player.x + 40;
+    const deathY = player.y - 30;
+    player.x = deathX;
+    player.y = deathY;
+
+    // Upgrade hero heavily before death: 3 weapon slots, modifiers, orbitals
+    applyWeaponPickupToSlots(player, 'spread');
+    applyWeaponPickupToSlots(player, 'spread');
+    applyWeaponPickupToSlots(player, 'machine_gun');
+    applyModifierPickup(player.weapon, 'freeze');
+    applyModifierPickup(player.weapon, 'pierce');
+    addOrbital(player, 'shooter_drone');
+    addOrbital(player, 'lightsaber');
+    expect(player.orbitals.length).toBe(2);
+    expect(player.weapon.modifiers.length).toBe(2);
+
+    // Lethal damage triggers death explosion (45-60 bright red particles)
+    const hitEvents: GameEvent[] = [];
+    damagePlayer(player, player.shield + player.hp + 50, config, hitEvents);
+    expect(player.hp).toBe(0);
+    expect(player.deathTimer).toBeCloseTo(HERO_DEATH_DURATION, 4);
+    const redExplosion = hitEvents.find(
+      (ev) => ev.type === 'vfx_explosion' && ev.count >= 45 && ev.count <= 60,
+    );
+    expect(redExplosion).toBeDefined();
+    expect(hitEvents.some((ev) => ev.type === 'sfx' && ev.sound === 'explosion')).toBe(true);
+    expect(hitEvents.some((ev) => ev.type === 'camera_shake')).toBe(true);
+
+    // During deathTimer, player cannot move or shoot
+    const activeInput = createDefaultInputState();
+    activeInput.moveX = 1;
+    activeInput.firing = true;
+    stepGameState(state, activeInput, FIXED_DT);
+    expect(player.x).toBeCloseTo(deathX, 4);
+    expect(player.y).toBeCloseTo(deathY, 4);
+    expect(state.playerProjectiles).toHaveLength(0);
+
+    // Advance until deathTimer finishes -> transitions to rezTimer with full loadout reset
+    const deathTicks = Math.ceil(HERO_DEATH_DURATION / FIXED_DT) + 2;
+    for (let t = 0; t < deathTicks; t++) {
+      stepGameState(state, activeInput, FIXED_DT);
+      if ((player.rezTimer ?? 0) > 0) break;
+    }
+
+    expect(player.lives).toBe(2);
+    expect(player.deathTimer).toBe(0);
+    expect(player.rezTimer).toBeGreaterThan(0);
+    expect(player.hp).toBe(config.playerMaxHp);
+    expect(player.shield).toBe(config.playerMaxShield);
+    expect(player.weapon.primary).toBe('pulse_rifle');
+    expect(player.weapon.level).toBe(1);
+    expect(player.weapon.modifiers).toHaveLength(0);
+    expect(player.weaponSlots?.[0]?.primary).toBe('pulse_rifle');
+    expect(player.weaponSlots?.[1]).toBeNull();
+    expect(player.weaponSlots?.[2]).toBeNull();
+    expect(player.orbitals).toHaveLength(0);
+    expect(player.x).toBeCloseTo(deathX, 2);
+    expect(player.y).toBeCloseTo(deathY, 2);
+
+    // Place overlapping enemies, a far enemy, hostile projectiles, and an overlapping boss
+    const nearEnemy = createEnforcer('tf_near', deathX + 20, deathY, config, 0);
+    const farEnemy = createEnforcer('tf_far', deathX + HERO_TELEFRAG_RADIUS + 180, deathY, config, 0);
+    state.enemies.push(nearEnemy, farEnemy);
+    state.enemyProjectiles.push({
+      id: 'tf_ep',
+      owner: 'enemy',
+      kind: 'bolt',
+      x: deathX + 10,
+      y: deathY,
+      z: 10,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      radius: 6,
+      damage: 40,
+      life: 5,
+      maxLife: 5,
+      bouncesLeft: 0,
+      modifiers: [],
+      color: '#ff2a55',
+    });
+    const boss = spawnBoss(state, 'abb');
+    boss.x = deathX + 30;
+    boss.y = deathY;
+    const bossHpBefore = boss.hp;
+
+    // During rezTimer, hero is 100% invulnerable to direct damage
+    const tookDuringRez = damagePlayer(player, 999, config, []);
+    expect(tookDuringRez).toBe(false);
+    expect(player.hp).toBe(config.playerMaxHp);
+
+    // Finish rezTimer -> hero materializes and telefrags overlapping hostiles
+    const rezTicks = Math.ceil(HERO_REZ_DURATION / FIXED_DT) + 2;
+    for (let t = 0; t < rezTicks; t++) {
+      stepGameState(state, createDefaultInputState(), FIXED_DT);
+      if ((player.rezTimer ?? 0) <= 0) break;
+    }
+
+    expect(player.rezTimer).toBe(0);
+    expect(player.invulnTimer).toBeGreaterThan(0); // 0.5s post-rez grace
+    expect(player.rezHaloTimer).toBeGreaterThan(0); // 0.15s fading flash halo
+    expect(state.enemies.some((e) => e.id === 'tf_near')).toBe(false);
+    expect(state.enemies.some((e) => e.id === 'tf_far')).toBe(true);
+    expect(state.enemyProjectiles.some((p) => p.id === 'tf_ep')).toBe(false);
+    expect(boss.hp).toBeLessThan(bossHpBefore);
+    expect(Math.hypot(boss.x - deathX, boss.y - deathY)).toBeGreaterThan(HERO_TELEFRAG_RADIUS);
+  });
+
+  it('plays the red-dot death explosion before Game Over when dying on final life (lives === 1)', () => {
+    const config = createDifficultyConfig();
+    const state = createGameStateForSector(0, config);
+    state.enemies.length = 0;
+    state.waveIndex = state.wavesPerSector;
+    state.bossSpawned = true;
+    state.player.lives = 1;
+
+    const events: GameEvent[] = [];
+    damagePlayer(state.player, state.player.shield + state.player.hp + 50, config, events);
+    expect(
+      events.some(
+        (ev) => ev.type === 'vfx_explosion' && ev.count === HERO_DEATH_PARTICLE_COUNT,
+      ),
+    ).toBe(true);
+    expect(state.player.deathTimer).toBeGreaterThan(0);
+    expect(state.gameOver).toBe(false);
+
+    // Still not game over mid-explosion
+    stepGameState(state, createDefaultInputState(), FIXED_DT);
+    expect(state.gameOver).toBe(false);
+
+    // Once deathTimer finishes, transitions cleanly to Game Over
+    const ticks = Math.ceil(HERO_DEATH_DURATION / FIXED_DT) + 2;
+    for (let t = 0; t < ticks; t++) {
+      stepGameState(state, createDefaultInputState(), FIXED_DT);
+    }
+    expect(state.player.lives).toBe(0);
+    expect(state.gameOver).toBe(true);
   });
 });

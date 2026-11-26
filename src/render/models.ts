@@ -489,7 +489,7 @@ export function buildAbb(): Slice[] {
   });
 }
 
-/** Floating Skullhead: white/gold/teal spherical skull-drone, twin glowing amber eyes, spinning halo wings, dangling legs. */
+/** Floating Skullhead: sculpted ivory/light-grey skull cranium, dark eye sockets with glowing orange/red laser eyes, nasal cavity, metallic jaw/teeth grille, and tiny spinning propeller hat on top. */
 export interface SkullheadModel {
   body: Slice[];
   halo: Slice[];
@@ -498,41 +498,82 @@ export interface SkullheadModel {
 export function buildSkullhead(): SkullheadModel {
   const body = layers(14, (ctx, cx, cy, z) => {
     const ivory = '#f1f5f9';
+    const boneLight = '#e2e8f0';
+    const boneShade = '#94a3b8';
+    const steelDark = '#1e293b';
+    const socket = '#090d16';
+    const eyeGlow = '#ff3b00';
+    const eyeCore = '#fef08a';
     const gold = '#facc15';
     const teal = '#14b8a6';
-    const amber = '#f59e0b';
-    if (z <= 3) {
-      // Dangling spider-like mechanical legs
-      rect(ctx, '#64748b', cx - 6, cy - 5, 2, 3);
-      rect(ctx, '#64748b', cx + 4, cy - 5, 2, 3);
-      rect(ctx, '#64748b', cx - 5, cy + 3, 2, 3);
-      rect(ctx, '#64748b', cx + 3, cy + 3, 2, 3);
-      rect(ctx, gold, cx - 3, cy - 2, 6, 4);
-    } else if (z <= 11) {
-      const r = z <= 5 || z >= 10 ? 6 : 8;
-      rect(ctx, ivory, cx - r, cy - r, r * 2, r * 2);
-      rect(ctx, teal, cx - r, cy + r - 2, r * 2, 2);
+
+    if (z <= 2) {
+      // Compact underslung mechanical tendrils & thruster base
+      rect(ctx, '#475569', cx - 6, cy - 4, 2, 3);
+      rect(ctx, '#475569', cx + 4, cy - 4, 2, 3);
+      rect(ctx, '#475569', cx - 5, cy + 3, 2, 3);
+      rect(ctx, '#475569', cx + 3, cy + 3, 2, 3);
+      rect(ctx, steelDark, cx - 4, cy - 3, 8, 6);
+      rect(ctx, teal, cx - 2, cy - 1, 4, 2);
+    } else if (z <= 4) {
+      // Metallic jaw & high-contrast teeth grille on the front (-Y)
+      rect(ctx, boneShade, cx - 6, cy - 5, 12, 11);
+      rect(ctx, steelDark, cx - 5, cy - 7, 10, 3);
+      // Alternating bright teeth bars along the front jaw (-Y)
+      rect(ctx, ivory, cx - 4, cy - 7, 2, 2);
+      rect(ctx, ivory, cx - 1, cy - 7, 2, 2);
+      rect(ctx, ivory, cx + 2, cy - 7, 2, 2);
+      rect(ctx, gold, cx - 6, cy + 4, 12, 2);
+    } else if (z <= 6) {
+      // Cheekbones + dark recessed nasal cavity on front (-Y)
+      rect(ctx, boneLight, cx - 8, cy - 6, 16, 13);
+      rect(ctx, ivory, cx - 7, cy - 7, 14, 3);
+      // Nasal cavity (dark recessed notch at front center)
+      rect(ctx, socket, cx - 2, cy - 8, 4, 3);
+      // Subtle cybernetic side plates
+      rect(ctx, boneShade, cx - 8, cy + 4, 16, 3);
+      rect(ctx, teal, cx - 5, cy + 6, 10, 1);
+    } else if (z <= 9) {
+      // Main skull face: sculpted cranium + deep dark eye sockets + glowing orange/red laser eyes
+      rect(ctx, ivory, cx - 8, cy - 7, 16, 14);
+      rect(ctx, boneLight, cx - 7, cy - 8, 14, 2);
+      // Deep dark recessed eye sockets on the front (-Y)
+      rect(ctx, socket, cx - 6, cy - 9, 5, 4);
+      rect(ctx, socket, cx + 1, cy - 9, 5, 4);
       if (z === 7 || z === 8) {
-        // Twin glowing amber/orange eyes
-        rect(ctx, '#64748b', cx - 6, cy - r - 1, 4, 3);
-        rect(ctx, '#64748b', cx + 2, cy - r - 1, 4, 3);
-        rect(ctx, amber, cx - 5, cy - r - 1, 3, 2);
-        rect(ctx, amber, cx + 2, cy - r - 1, 3, 2);
+        // Bright glowing orange/red laser-shooting eyes with white-hot core
+        rect(ctx, eyeGlow, cx - 5, cy - 9, 3, 3);
+        rect(ctx, eyeGlow, cx + 2, cy - 9, 3, 3);
+        rect(ctx, eyeCore, cx - 4, cy - 9, 1, 2);
+        rect(ctx, eyeCore, cx + 3, cy - 9, 1, 2);
       }
-      if (z === 5) {
-        // Skull jaw grille
-        rect(ctx, gold, cx - 4, cy - r, 8, 2);
-      }
+      // Subtle temple accents on back/sides
+      rect(ctx, boneShade, cx - 8, cy + 5, 16, 2);
     } else {
-      rect(ctx, gold, cx - 5, cy - 5, 10, 10);
-      rect(ctx, teal, cx - 3, cy - 3, 6, 6);
+      // Rounded sculpted ivory/light-grey cranium dome tapering to top
+      const r = z === 10 ? 7 : z === 11 ? 6 : z === 12 ? 5 : 3;
+      rect(ctx, z % 2 === 0 ? ivory : boneLight, cx - r, cy - r, r * 2, r * 2);
+      if (z === 11 || z === 12) {
+        rect(ctx, gold, cx - 1, cy + r - 2, 2, 2);
+      }
     }
   });
 
+  // Tiny spinning propeller hat perched cleanly on the very top of the dome
   const halo = layers(3, (ctx, cx, cy, z) => {
-    // Wide translucent spinning halo/rotor wings
-    rect(ctx, z === 1 ? '#2dd4bf' : '#facc15', cx - 11, cy - 2, 22, 4);
-    rect(ctx, '#fef08a', cx - 2, cy - 11, 4, 22);
+    if (z === 0) {
+      // Tiny beanie cap hub
+      rect(ctx, '#14b8a6', cx - 2, cy - 2, 4, 4);
+      rect(ctx, '#facc15', cx - 1, cy - 1, 2, 2);
+    } else if (z === 1) {
+      // Short rotor spindle
+      rect(ctx, '#cbd5e1', cx - 1, cy - 1, 2, 2);
+    } else {
+      // Tiny spinning propeller blades (compact 8px span, never covers face)
+      rect(ctx, '#facc15', cx - 4, cy - 1, 8, 2);
+      rect(ctx, '#2dd4bf', cx - 1, cy - 4, 2, 8);
+      rect(ctx, '#ffffff', cx - 1, cy - 1, 2, 2);
+    }
   });
 
   return { body, halo };

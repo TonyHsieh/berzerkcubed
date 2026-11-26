@@ -172,3 +172,23 @@ Spec: `docs/specs/milestone-4.11-tweaks.md`.
 - **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
   - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed).
   - `pnpm test` (`vitest run`): **PASSED** — **14 test files passed (14), 102 tests passed (102)** (all 88 prior tests + 14 new Milestone 4.11 tests).
+
+---
+
+## Milestone 4.12 — Rotation Depth-Sorting Fix, Rez-In Flash, Skullhead Face & Hero Death/Telefrag Respawn
+
+Spec: `docs/specs/milestone-4.12-tweaks.md`.
+
+- **Files created**:
+  - `src/game/renderer.test.ts` — 4 Vitest unit tests covering 3D wall chunking across `0°/90°/180°/270°`, retracting 3D sliding door chunks, two-stage `rezFlashPhase` (`0..0.80` beam, `0.80..1.0` opaque flash, `0.15s` post-rez halo), and Skullhead model geometry.
+- **Files modified**:
+  - `src/engine/types.ts` — added `deathTimer`, `rezTimer`, `rezDuration`, `rezHaloTimer`, `deathX`, `deathY` to `PlayerState`, and `rezHaloTimer` to `EnemyState` & `BossState`.
+  - `src/entities/player.ts` — exported `HERO_DEATH_DURATION` (`0.85`), `HERO_REZ_DURATION` (`1.0`), `HERO_POST_REZ_INVULN` (`0.5`), `HERO_TELEFRAG_RADIUS` (`64`), `HERO_DEATH_PARTICLE_COUNT` (`54`), `clampToSafeIslandFloor`, `resetPlayerLoadout`, `triggerHeroDeath`; updated `isPlayerInvulnerable`, `damagePlayer`, and `updatePlayer` (input freeze while dying/rezzing, red-dot death explosion, safe-floor edge-fall respawn).
+  - `src/bosses/bossUtils.ts` — updated `applyBossDamageToPlayer` to respect `deathTimer > 0` and `rezTimer > 0` invulnerability.
+  - `src/game/gameState.ts` — exported `TelefragResult`, `telefragTargets`, and `stepHeroDeath`; wired death explosion → full loadout reset at clamped death location → invulnerable Rez-In → `64px` telefrag (destroying overlapping enemies/projectiles & knocking back/damaging overlapping bosses) + `0.15s` post-rez halo tracking for hero, enemies, and bosses.
+  - `src/game/renderer.ts` — exported `DEFAULT_WALL_CHUNK_SIZE`, `WallChunk`, `chunkWallForDepthSort`, `chunkSlidingDoorForDepthSort`, `REZ_POST_HALO_SEC`, `RezFlashPhase`, `rezFlashPhase`; subdivided walls and 3D Approach-B sliding doors (`drawDoor3D`) into ~56px depth-sorted chunks; upgraded `drawRezInBeam` + `drawPostRezHalo` with two-stage beam → opaque flash silhouette climax; hid hero during `deathTimer > 0` and rendered hero Rez-In + post-rez halo; perched Skullhead's tiny spinning propeller hat on top of its dome.
+  - `src/render/models.ts` — redesigned `buildSkullhead()` with sculpted ivory/light-grey skull cranium, deep dark eye sockets, glowing orange/red laser eyes, nasal cavity, metallic jaw/teeth grille on `-Y` front, and a tiny 8px spinning propeller hat.
+  - `src/game/gameState.test.ts` — added 2 Milestone 4.12 integration tests (full hero death → `deathTimer` → full loadout reset → `rezTimer` invulnerability → telefrag flow, and final-life `lives === 1` death explosion before Game Over).
+- **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed, built in 2.27s).
+  - `pnpm test` (`vitest run`): **PASSED** — **15 test files passed (15), 108 tests passed (108)** (all 102 prior tests + 6 new Milestone 4.12 tests).

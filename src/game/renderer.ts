@@ -11,6 +11,7 @@ import type {
   PlayerState,
   PowerUpPickup,
   Projectile,
+  SlidingDoor,
   WallSegment,
 } from '../engine/types';
 import { getOrbitalWorldPos } from '../entities/orbitals';
@@ -28,6 +29,206 @@ import type { GameState } from './gameState';
 
 const SPRITE_SCALE = 2;
 const BASE_LAYER_SPACING = 2.0;
+
+/** Default chunk size (world px) for subdividing long walls & doors for rotation-safe depth sorting. */
+export const DEFAULT_WALL_CHUNK_SIZE = 56;
+/** Duration (seconds) of the brief post-rez fading flash halo after materialization completes. */
+export const REZ_POST_HALO_SEC = 0.15;
+
+export interface WallChunk {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  heightZ: number;
+  electrified: boolean;
+  destructible: boolean;
+  screenX: number;
+  screenY: number;
+  sortY: number;
+  isDoor?: boolean;
+  openFraction?: number;
+}
+
+/**
+ * Milestone 4.12: Subdivides a long wall segment into ~48-64px Approach-B chunks
+ * and projects each chunk's exact center via `project(...)` so walls depth-sort
+ * accurately at any Q/E camera rotation angle (0°–360°).
+ */
+export function chunkWallForDepthSort(
+  wall: WallSegment,
+  project: (wx: number, wy: number) => { x: number; y: number },
+  chunkSize = DEFAULT_WALL_CHUNK_SIZE,
+): WallChunk[] {
+  const safeSize = Math.max(16, chunkSize);
+  const cols = Math.max(1, Math.ceil(wall.w / safeSize));
+  const rows = Math.max(1, Math.ceil(wall.h / safeSize));
+  const cw = wall.w / cols;
+  const ch = wall.h / rows;
+  const chunks: WallChunk[] = [];
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cx = wall.x + c * cw;
+      const cy = wall.y + r * ch;
+      const s = project(cx + cw * 0.5, cy + ch * 0.5);
+      chunks.push({
+        x: cx,
+        y: cy,
+        w: cw,
+        h: ch,
+        heightZ: wall.heightZ,
+        electrified: wall.electrified,
+        destructible: wall.destructible,
+        screenX: s.x,
+        screenY: s.y,
+        sortY: s.y,
+      });
+    }
+  }
+  return chunks;
+}
+
+/**
+ * Milestone 4.12: Converts a sliding door into retracting 3D energy-gate panels
+ * subdivided into rotation-safe Approach-B chunks for the depth-sorted renderQueue.
+ */
+export function chunkSlidingDoorForDepthSort(
+  door: SlidingDoor,
+  project: (wx: number, wy: number) => { x: number; y: number },
+  chunkSize = DEFAULT_WALL_CHUNK_SIZE,
+): WallChunk[] {
+  const open = Math.max(0, Math.min(1, door.openFraction));
+  const closedFrac = Math.max(0, 1 - open);
+  if (closedFrac <= 0.02) return [];
+
+  const horiz = door.w >= door.h;
+  const panels: WallSegment[] = [];
+  if (horiz) {
+    const panelW = door.w * 0.5 * closedFrac;
+    panels.push(
+      {
+        id: `${door.id}_a`,
+        x: door.x,
+        y: door.y,
+        w: panelW,
+        h: door.h,
+        heightZ: 28,
+        electrified: false,
+        destructible: false,
+      },
+      {
+        id: `${door.id}_b`,
+        x: door.x + door.w - panelW,
+        y: door.y,
+        w: panelW,
+        h: door.h,
+        heightZ: 28,
+        electrified: false,
+        destructible: false,
+      },
+    );
+  } else {
+    const panelH = door.h * 0.5 * closedFrac;
+    panels.push(
+      {
+        id: `${door.id}_a`,
+        x: door.x,
+        y: door.y,
+        w: door.w,
+        h: panelH,
+        heightZ: 28,
+        electrified: false,
+        destructible: false,
+      },
+      {
+        id: `${door.id}_b`,
+        x: door.x,
+        y: door.y + door.h - panelH,
+        w: door.w,
+        h: panelH,
+        heightZ: 28,
+        electrified: false,
+        destructible: false,
+      },
+    );
+  }
+
+  const chunks: WallChunk[] = [];
+  for (let i = 0; i < panels.length; i++) {
+    const sub = chunkWallForDepthSort(panels[i], project, chunkSize);
+    for (let k = 0; k < sub.length; k++) {
+      sub[k].isDoor = true;
+      sub[k].openFraction = open;
+      chunks.push(sub[k]);
+    }
+  }
+  return chunks;
+}
+
+export interface RezFlashPhase {
+  stage: 'beam' | 'flash' | 'halo' | 'done';
+  beamAlpha: number;
+  entityAlpha: number;
+  flashAlpha: number;
+  haloAlpha: number;
+  showSolidEntity: boolean;
+}
+
+/**
+ * Milestone 4.12: Pure two-stage TRON Rez-In phase calculator.
+ * - `0.00..0.80`: rising wireframe/scanline beam + converging rings; entity ghosted inside.
+ * - `0.80..1.00`: rapidly brightens into a solid, fully opaque white/neon flash silhouette.
+ * - `1.00` + `postRezElapsed < 0.15s`: solid robot snaps in + brief fading flash halo.
+ * - `1.00` + `postRezElapsed >= 0.15s`: normal solid entity.
+ */
+export function rezFlashPhase(
+  progress: number,
+  postRezElapsed = 0,
+): RezFlashPhase {
+  const p = Math.max(0, Math.min(1, progress));
+  if (p < 0.8) {
+    const t = p / 0.8;
+    return {
+      stage: 'beam',
+      beamAlpha: 1,
+      entityAlpha: 0.1 + t * 0.25,
+      flashAlpha: 0,
+      haloAlpha: 0,
+      showSolidEntity: false,
+    };
+  }
+  if (p < 1.0) {
+    const t = (p - 0.8) / 0.2;
+    return {
+      stage: 'flash',
+      beamAlpha: Math.max(0.25, 1 - t * 0.5),
+      entityAlpha: 0,
+      flashAlpha: Math.min(1, 0.35 + t * 0.65),
+      haloAlpha: 0,
+      showSolidEntity: false,
+    };
+  }
+  if (postRezElapsed >= 0 && postRezElapsed < REZ_POST_HALO_SEC) {
+    const haloAlpha = Math.max(0, Math.min(1, 1 - postRezElapsed / REZ_POST_HALO_SEC));
+    return {
+      stage: 'halo',
+      beamAlpha: 0,
+      entityAlpha: 1,
+      flashAlpha: 0,
+      haloAlpha,
+      showSolidEntity: true,
+    };
+  }
+  return {
+    stage: 'done',
+    beamAlpha: 0,
+    entityAlpha: 1,
+    flashAlpha: 0,
+    haloAlpha: 0,
+    showSolidEntity: true,
+  };
+}
 
 interface RenderQueueItem {
   sortY: number;
@@ -151,48 +352,16 @@ function renderIslandWorld(
   ctx.strokeRect(b.x, b.y, b.w, b.h);
   ctx.restore();
 
-  // 3. Synchronized sliding doors
+  // 3. Synchronized sliding door floor tracks (solid 3D energy-gate panels are
+  //    depth-sorted in renderQueue via chunkSlidingDoorForDepthSort + drawDoor3D).
   for (let i = 0; i < island.doors.length; i++) {
     const d = island.doors[i];
-    const horiz = d.w >= d.h;
-    const open = d.openFraction;
-    const closedFrac = Math.max(0, 1 - open);
-
-    // Door frame track
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle =
+      d.openFraction >= 0.75
+        ? 'rgba(34, 211, 238, 0.45)'
+        : 'rgba(245, 158, 11, 0.4)';
+    ctx.lineWidth = 1.5;
     ctx.strokeRect(d.x, d.y, d.w, d.h);
-
-    const panelColor = open >= 0.75 ? 'rgba(34, 211, 238, 0.25)' : '#0f172a';
-    const panelEdge = open >= 0.75 ? '#22d3ee' : '#f59e0b';
-    const drawDoorPanel = (px: number, py: number, pw: number, ph: number): void => {
-      // Milestone 4.1 Fix 4: synchronized doors use the same upright vertical
-      // Z-stack as walls (no lateral skew).
-      const doorLayers = 6;
-      const doorStep = 2;
-      for (let z = 0; z < doorLayers; z++) {
-        const inset = z;
-        const y = py - z * doorStep;
-        const layerW = Math.max(1, pw - inset * 2);
-        ctx.fillStyle = z === doorLayers - 1 ? panelColor : '#0b1220';
-        ctx.fillRect(px + inset, y, layerW, ph);
-        ctx.strokeStyle = z === doorLayers - 1 ? panelEdge : 'rgba(56, 189, 248, 0.28)';
-        ctx.lineWidth = z === doorLayers - 1 ? 2 : 1;
-        ctx.strokeRect(px + inset, y, layerW, ph);
-      }
-    };
-
-    if (closedFrac > 0.02) {
-      if (horiz) {
-        const panelW = (d.w * 0.5) * closedFrac;
-        drawDoorPanel(d.x, d.y, panelW, d.h);
-        drawDoorPanel(d.x + d.w - panelW, d.y, panelW, d.h);
-      } else {
-        const panelH = (d.h * 0.5) * closedFrac;
-        drawDoorPanel(d.x, d.y, d.w, panelH);
-        drawDoorPanel(d.x, d.y + d.h - panelH, d.w, panelH);
-      }
-    }
   }
 
   // 4. Walls are drawn in the depth-sorted renderQueue as extruded 3D blocks
@@ -346,6 +515,83 @@ function drawWall3D(
   ctx.restore();
 }
 
+/**
+ * Milestone 4.12: True vertical Approach-B 3D stacked energy-gate block for
+ * sliding doors, aligned seamlessly with walls at any Q/E camera angle.
+ */
+function drawDoor3D(
+  ctx: CanvasRenderingContext2D,
+  chunk: WallChunk,
+  camAngleDeg: number,
+  zScale: number,
+  elapsedTime: number,
+): void {
+  const segW = chunk.w;
+  const segD = chunk.h;
+  const open = chunk.openFraction ?? 0;
+  const stepCount = 8;
+  const spacingPx = Math.max(1.2, (chunk.heightZ * zScale) / stepCount);
+  const rad = (camAngleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const localCorners: Array<[number, number]> = [
+    [-segW / 2, -segD / 2],
+    [segW / 2, -segD / 2],
+    [segW / 2, segD / 2],
+    [-segW / 2, segD / 2],
+  ];
+  const poly = localCorners.map(([x, y]) => ({
+    x: x * cos - y * sin,
+    y: x * sin + y * cos,
+  }));
+
+  const isOpening = open >= 0.75;
+  const neon = isOpening ? '#22d3ee' : '#f59e0b';
+  const pulse = 0.72 + 0.28 * Math.sin(elapsedTime * 10);
+
+  ctx.save();
+  ctx.translate(chunk.screenX, chunk.screenY);
+
+  for (let z = 0; z < stepCount; z++) {
+    const lift = z * spacingPx;
+    const t = z / (stepCount - 1);
+    ctx.beginPath();
+    for (let i = 0; i < poly.length; i++) {
+      if (i === 0) ctx.moveTo(poly[i].x, poly[i].y - lift);
+      else ctx.lineTo(poly[i].x, poly[i].y - lift);
+    }
+    ctx.closePath();
+    const shade = Math.round(12 + t * 24);
+    ctx.fillStyle = isOpening
+      ? `rgba(14, ${shade + 22}, ${shade + 42}, 0.82)`
+      : `rgb(${shade + 18}, ${shade + 8}, 10)`;
+    ctx.fill();
+    ctx.strokeStyle = neon;
+    ctx.globalAlpha = z === stepCount - 1 ? 0.95 : 0.35 * pulse;
+    ctx.lineWidth = z === stepCount - 1 ? 2 : 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // Glowing energy-gate top cap
+  ctx.save();
+  ctx.shadowColor = neon;
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = neon;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < poly.length; i++) {
+    const ly = poly[i].y - (stepCount - 1) * spacingPx;
+    if (i === 0) ctx.moveTo(poly[i].x, ly);
+    else ctx.lineTo(poly[i].x, ly);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.restore();
+}
+
 function drawHero(
   ctx: CanvasRenderingContext2D,
   player: PlayerState,
@@ -465,8 +711,9 @@ function drawHero(
 }
 
 /**
- * TRON "REZ-In" vertical materialization beam: glowing neon grid pillar +
- * rising horizontal scan ring + digital rez sparks.
+ * TRON "REZ-In" upright screen-space vertical materialization beam (camera-angle invariant):
+ * - 0%..80%: neon wireframe/scanline beam + converging energy rings (entity ghosted inside).
+ * - 80%..100%: rapidly brightens into a solid, fully opaque white/neon flash silhouette.
  */
 function drawRezInBeam(
   ctx: CanvasRenderingContext2D,
@@ -479,42 +726,135 @@ function drawRezInBeam(
   elapsedTime: number,
 ): void {
   const clamped = Math.max(0, Math.min(1, progress));
-  const scanY = screenY - clamped * heightPx;
+  const phase = rezFlashPhase(clamped);
+  const scanY = screenY - Math.min(1, clamped / 0.8) * heightPx;
   ctx.save();
 
-  // Vertical neon grid pillar
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.14 * (1 - clamped * 0.4);
-  ctx.fillRect(screenX - radius, screenY - heightPx, radius * 2, heightPx);
+  // Stage 1 (and fading behind Stage 2): Upright screen-space vertical neon wireframe beam
+  if (phase.beamAlpha > 0) {
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.16 * phase.beamAlpha;
+    ctx.fillRect(screenX - radius, screenY - heightPx, radius * 2, heightPx);
 
-  ctx.strokeStyle = color;
-  ctx.globalAlpha = 0.55;
-  ctx.lineWidth = 1;
-  for (let gx = -radius; gx <= radius; gx += Math.max(6, radius * 0.5)) {
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.6 * phase.beamAlpha;
+    ctx.lineWidth = 1;
+    const gridStep = Math.max(6, radius * 0.5);
+    for (let gx = -radius; gx <= radius; gx += gridStep) {
+      ctx.beginPath();
+      ctx.moveTo(screenX + gx, screenY - heightPx);
+      ctx.lineTo(screenX + gx, screenY);
+      ctx.stroke();
+    }
+
+    // Converging horizontal energy rings
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 14;
+    for (let r = 0; r < 2; r++) {
+      const ringPhase = (clamped * 2.5 + r * 0.5) % 1;
+      const ringScale = 1.65 - ringPhase * 0.65;
+      ctx.globalAlpha = (0.35 + ringPhase * 0.55) * phase.beamAlpha;
+      ctx.strokeStyle = r === 0 ? '#ffffff' : color;
+      ctx.lineWidth = r === 0 ? 2.5 : 1.5;
+      ctx.beginPath();
+      ctx.ellipse(
+        screenX,
+        scanY + r * 8,
+        radius * ringScale,
+        Math.max(4, radius * 0.35 * ringScale),
+        0,
+        0,
+        Math.PI * 2,
+      );
+      ctx.stroke();
+    }
+
+    // Digital rez sparks along the scan ring
+    ctx.globalAlpha = 0.9 * phase.beamAlpha;
+    ctx.fillStyle = color;
+    for (let s = 0; s < 5; s++) {
+      const a = elapsedTime * 14 + s * 1.25;
+      const sx = screenX + Math.cos(a) * radius * 0.95;
+      const sy = scanY + Math.sin(a * 1.7) * 5;
+      ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
+    }
+  }
+
+  // Stage 2 (80%..100%): Solid, fully opaque white/neon flash silhouette covering footprint
+  if (phase.flashAlpha > 0) {
+    const silW = radius * 1.9;
+    const silH = heightPx * 0.92;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 24;
+
+    // Outer neon flash shell
+    ctx.globalAlpha = phase.flashAlpha;
+    ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.moveTo(screenX + gx, screenY - heightPx);
-    ctx.lineTo(screenX + gx, screenY);
-    ctx.stroke();
+    ctx.ellipse(
+      screenX,
+      screenY - silH * 0.45,
+      silW * 0.58,
+      silH * 0.54,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+
+    // Solid opaque white core silhouette
+    ctx.globalAlpha = Math.min(1, phase.flashAlpha * 1.05);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.ellipse(
+      screenX,
+      screenY - silH * 0.45,
+      silW * 0.44,
+      silH * 0.46,
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
   }
 
-  // Rising horizontal scan ring
-  ctx.globalAlpha = 0.95;
+  ctx.restore();
+}
+
+/**
+ * Milestone 4.12: Brief 0.15s fading flash halo immediately after solid materialization.
+ */
+function drawPostRezHalo(
+  ctx: CanvasRenderingContext2D,
+  screenX: number,
+  screenY: number,
+  radius: number,
+  heightPx: number,
+  haloTimer: number,
+  color: string,
+): void {
+  const elapsed = Math.max(0, REZ_POST_HALO_SEC - haloTimer);
+  const phase = rezFlashPhase(1.0, elapsed);
+  if (phase.haloAlpha <= 0) return;
+
+  const expand = 1 + (1 - phase.haloAlpha) * 0.45;
+  ctx.save();
+  ctx.globalAlpha = phase.haloAlpha * 0.85;
   ctx.shadowColor = color;
-  ctx.shadowBlur = 14;
+  ctx.shadowBlur = 18;
   ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 2.5;
+  ctx.lineWidth = 3 * phase.haloAlpha + 1;
   ctx.beginPath();
-  ctx.ellipse(screenX, scanY, radius * 1.15, Math.max(4, radius * 0.35), 0, 0, Math.PI * 2);
+  ctx.ellipse(
+    screenX,
+    screenY - heightPx * 0.4,
+    radius * expand,
+    heightPx * 0.45 * expand,
+    0,
+    0,
+    Math.PI * 2,
+  );
   ctx.stroke();
-
-  // Digital rez sparks along the scan ring
-  ctx.fillStyle = color;
-  for (let s = 0; s < 5; s++) {
-    const a = elapsedTime * 14 + s * 1.25;
-    const sx = screenX + Math.cos(a) * radius * 0.95;
-    const sy = scanY + Math.sin(a * 1.7) * 5;
-    ctx.fillRect(sx - 1.5, sy - 1.5, 3, 3);
-  }
   ctx.restore();
 }
 
@@ -581,17 +921,23 @@ function drawBoss(
   ctx.restore();
 
   ctx.save();
-  if (rezzing) {
-    // Progressive bottom-to-top reveal clip during TRON rez-in
-    const revealH = Math.max(2, bossHeightPx * rezProg);
-    ctx.beginPath();
-    ctx.rect(
-      screenX - boss.radius * 2.5,
-      screenY + 30 - revealH,
-      boss.radius * 5,
-      revealH + 40,
-    );
-    ctx.clip();
+  const bossRezPhase = rezzing ? rezFlashPhase(rezProg) : null;
+  if (rezzing && bossRezPhase) {
+    // 0%..80%: ghosted inside rising scanline clip; 80%..100%: hidden under opaque flash silhouette
+    if (bossRezPhase.entityAlpha <= 0) {
+      ctx.globalAlpha = 0;
+    } else {
+      ctx.globalAlpha = bossRezPhase.entityAlpha;
+      const revealH = Math.max(2, bossHeightPx * Math.min(1, rezProg / 0.8));
+      ctx.beginPath();
+      ctx.rect(
+        screenX - boss.radius * 2.5,
+        screenY + 30 - revealH,
+        boss.radius * 5,
+        revealH + 40,
+      );
+      ctx.clip();
+    }
   }
 
   if (boss.kind === 'maximilian') {
@@ -758,8 +1104,9 @@ function drawBoss(
       zLift,
       spacingPx * 1.5,
     );
+    // Tiny spinning propeller hat perched cleanly on the very top of the dome
     ctx.save();
-    ctx.globalAlpha = 0.72;
+    ctx.globalAlpha = 0.95;
     drawStack(
       ctx,
       models.skullhead.halo,
@@ -767,8 +1114,8 @@ function drawBoss(
       screenY,
       boss.bladeAngle,
       camAngle,
-      scale * 1.25,
-      zLift + 8 * spacingPx * 1.5,
+      scale * 0.85,
+      zLift + models.skullhead.body.length * spacingPx * 1.5,
       spacingPx,
     );
     ctx.restore();
@@ -942,9 +1289,11 @@ function drawBoss(
     ctx.restore();
   }
 
-  // TRON Rez-In beam overlay for bosses
+  // TRON Rez-In beam + opaque flash overlay for bosses, plus 0.15s post-rez halo
   if (rezzing) {
     drawRezInBeam(ctx, screenX, screenY, boss.radius * 1.15, bossHeightPx, rezProg, '#22d3ee', elapsedTime);
+  } else if ((boss.rezHaloTimer ?? 0) > 0) {
+    drawPostRezHalo(ctx, screenX, screenY, boss.radius * 1.15, bossHeightPx, boss.rezHaloTimer ?? 0, '#22d3ee');
   }
 }
 
@@ -1252,26 +1601,56 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
       // 3. Build depth-sorted renderQueue by screen Y
       renderQueue.length = 0;
 
-      // True 3D extruded walls/doors interleave with units and projectiles.
+      // True 3D extruded walls & sliding doors subdivided into ~56px Approach-B
+      // chunks so every chunk projects & depth-sorts accurately at any Q/E angle.
       const wallOutline = state.island.outline === 'red' ? '#ef4444' : '#22d3ee';
+      let wallChunkIdx = 0;
       for (let i = 0; i < state.island.walls.length; i++) {
         const wall = state.island.walls[i];
-        const s = project(wall.x + wall.w * 0.5, wall.y + wall.h * 0.5);
-        renderQueue.push({
-          sortY: s.y + wall.h * 0.5,
-          draw: (c) =>
-            drawWall3D(
-              c,
-              wall,
-              s.x,
-              s.y,
-              camAngle,
-              zScale,
-              state.elapsedTime,
-              i,
-              wallOutline,
-            ),
-        });
+        const chunks = chunkWallForDepthSort(wall, project);
+        for (let k = 0; k < chunks.length; k++) {
+          const chunk = chunks[k];
+          const idx = wallChunkIdx++;
+          const segWall: WallSegment = {
+            id: `${wall.id}_c${k}`,
+            x: chunk.x,
+            y: chunk.y,
+            w: chunk.w,
+            h: chunk.h,
+            heightZ: chunk.heightZ,
+            electrified: chunk.electrified,
+            destructible: chunk.destructible,
+          };
+          renderQueue.push({
+            sortY: chunk.sortY,
+            draw: (c) =>
+              drawWall3D(
+                c,
+                segWall,
+                chunk.screenX,
+                chunk.screenY,
+                camAngle,
+                zScale,
+                state.elapsedTime,
+                idx,
+                wallOutline,
+              ),
+          });
+        }
+      }
+
+      // 3D stacked sliding door energy-gate chunks
+      for (let i = 0; i < state.island.doors.length; i++) {
+        const door = state.island.doors[i];
+        const doorChunks = chunkSlidingDoorForDepthSort(door, project);
+        for (let k = 0; k < doorChunks.length; k++) {
+          const chunk = doorChunks[k];
+          renderQueue.push({
+            sortY: chunk.sortY,
+            draw: (c) =>
+              drawDoor3D(c, chunk, camAngle, zScale, state.elapsedTime),
+          });
+        }
       }
 
       // Crates
@@ -1340,13 +1719,22 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
               drawY += Math.cos(rad) * kick;
             }
 
+            const enemyRezColor =
+              e.kind === 'v_bot_laser' || e.kind === 'grenadier' ? '#facc15' : '#22d3ee';
+            const enemyRezPhase = rezzing ? rezFlashPhase(rezProg) : null;
+
             c.save();
-            if (rezzing) {
-              const spriteH = 56;
-              const revealH = Math.max(2, spriteH * rezProg);
-              c.beginPath();
-              c.rect(s.x - 32, s.y + 12 - revealH, 64, revealH + 16);
-              c.clip();
+            if (rezzing && enemyRezPhase) {
+              if (enemyRezPhase.entityAlpha <= 0) {
+                c.globalAlpha = 0;
+              } else {
+                c.globalAlpha = enemyRezPhase.entityAlpha;
+                const spriteH = 56;
+                const revealH = Math.max(2, spriteH * Math.min(1, rezProg / 0.8));
+                c.beginPath();
+                c.rect(s.x - 32, s.y + 12 - revealH, 64, revealH + 16);
+                c.clip();
+              }
             }
             cache.drawCached(c, key, drawX, drawY, e.angle, camAngle, e.z * zScale);
             c.restore();
@@ -1359,8 +1747,18 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
                 e.radius + 4,
                 56,
                 rezProg,
-                e.kind === 'v_bot_laser' || e.kind === 'grenadier' ? '#facc15' : '#22d3ee',
+                enemyRezColor,
                 state.elapsedTime,
+              );
+            } else if ((e.rezHaloTimer ?? 0) > 0) {
+              drawPostRezHalo(
+                c,
+                s.x,
+                s.y,
+                e.radius + 4,
+                56,
+                e.rezHaloTimer ?? 0,
+                enemyRezColor,
               );
             }
 
@@ -1396,21 +1794,70 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
         });
       }
 
-      // Hero
-      renderQueue.push({
-        sortY: playerScreen.y,
-        draw: (c) =>
-          drawHero(
-            c,
-            state.player,
-            models,
-            playerScreen.x,
-            playerScreen.y,
-            camera,
-            spacingPx,
-            zScale,
-          ),
-      });
+      // Hero (hidden during death explosion; two-stage Rez-In beam + opaque flash on respawn)
+      const heroDying = (state.player.deathTimer ?? 0) > 0;
+      const heroRezzing = (state.player.rezTimer ?? 0) > 0;
+      if (!heroDying) {
+        renderQueue.push({
+          sortY: playerScreen.y,
+          draw: (c) => {
+            if (heroRezzing) {
+              const rezProg =
+                1 -
+                (state.player.rezTimer ?? 0) /
+                  Math.max(0.01, state.player.rezDuration ?? 1.0);
+              const phase = rezFlashPhase(rezProg);
+              if (phase.entityAlpha > 0) {
+                c.save();
+                c.globalAlpha = phase.entityAlpha;
+                drawHero(
+                  c,
+                  state.player,
+                  models,
+                  playerScreen.x,
+                  playerScreen.y,
+                  camera,
+                  spacingPx,
+                  zScale,
+                );
+                c.restore();
+              }
+              drawRezInBeam(
+                c,
+                playerScreen.x,
+                playerScreen.y,
+                state.player.radius + 6,
+                64,
+                rezProg,
+                '#22d3ee',
+                state.elapsedTime,
+              );
+              return;
+            }
+            drawHero(
+              c,
+              state.player,
+              models,
+              playerScreen.x,
+              playerScreen.y,
+              camera,
+              spacingPx,
+              zScale,
+            );
+            if ((state.player.rezHaloTimer ?? 0) > 0) {
+              drawPostRezHalo(
+                c,
+                playerScreen.x,
+                playerScreen.y,
+                state.player.radius + 6,
+                64,
+                state.player.rezHaloTimer ?? 0,
+                '#22d3ee',
+              );
+            }
+          },
+        });
+      }
 
       // Orbitals
       for (let i = 0; i < state.player.orbitals.length; i++) {

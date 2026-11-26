@@ -120,6 +120,16 @@ export interface PlayerState {
   invulnTimer: number;
   lastSafeX: number;
   lastSafeY: number;
+  /** Milestone 4.12: hero death explosion countdown (>0 = hidden, immobile). */
+  deathTimer?: number;
+  /** Milestone 4.12: hero rez-in teleport countdown (>0 = invulnerable, beam + flash). */
+  rezTimer?: number;
+  rezDuration?: number;
+  /** Milestone 4.12: brief post-rez fading flash halo countdown (0.15s). */
+  rezHaloTimer?: number;
+  /** Milestone 4.12: world coordinates where hero died (respawn anchor). */
+  deathX?: number;
+  deathY?: number;
   recoil: number;
   muzzleFlash: number;
   weapon: ActiveWeaponState; // active weapon; mirrors weaponSlots[activeSlot]
@@ -250,6 +260,8 @@ export interface EnemyState {
   /** Milestone 4.11: TRON rez-in materialization countdown (>0 = invulnerable, stationary). */
   rezTimer?: number;
   rezDuration?: number;
+  /** Milestone 4.12: brief post-rez fading flash halo countdown (0.15s). */
+  rezHaloTimer?: number;
 }
 
 export type BossKind =
@@ -326,6 +338,8 @@ export interface BossState {
   /** Milestone 4.11: TRON rez-in materialization countdown. */
   rezTimer?: number;
   rezDuration?: number;
+  /** Milestone 4.12: brief post-rez fading flash halo countdown (0.15s). */
+  rezHaloTimer?: number;
   // Recogniser sky-slam shadow telegraph
   slamTargetX?: number;
   slamTargetY?: number;
