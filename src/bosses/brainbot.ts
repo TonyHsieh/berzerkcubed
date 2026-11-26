@@ -12,6 +12,7 @@ import type {
 import {
   applyBossDamageToPlayer,
   BOSS_FIRE_ANIM_SEC,
+  computeBossShieldConfig,
   nextBossProjectileId,
   stepBossCommonTimers,
 } from './bossUtils';
@@ -35,6 +36,7 @@ let brainSeq = 0;
  */
 export function createBrainbot(x: number, y: number): BossState {
   brainSeq += 1;
+  const shields = computeBossShieldConfig(BRAINBOT_MAX_HP, 0);
   return {
     id: `boss_brainbot_${brainSeq}`,
     kind: 'brainbot',
@@ -67,6 +69,7 @@ export function createBrainbot(x: number, y: number): BossState {
     ],
     bladeAngle: 0,
     bladeRadius: 0,
+    ...shields,
     fireAnimTimer: 0,
     hitFlash: 0,
   };

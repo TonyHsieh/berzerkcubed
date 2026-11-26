@@ -12,6 +12,7 @@ import type {
 import {
   applyBossDamageToPlayer,
   BOSS_FIRE_ANIM_SEC,
+  computeBossShieldConfig,
   nextBossProjectileId,
   stepBossCommonTimers,
 } from './bossUtils';
@@ -25,11 +26,19 @@ const RECOVER_DURATION = 0.8;
 
 const STALK_SPEED = 110;
 const DASH_SPEED = 540;
-const MISSILE_RING_COUNT = 8;
-export const ABB_ICBM_SPEED = 290;
-export const ABB_ICBM_TURN_RATE = 2.0; // rad/s capped angular turn rate (sweeping dodgeable arcs)
+export const ABB_ICBM_SPEED = 390; // px/s (360-420 high-speed guided rocket)
+export const ABB_ICBM_TURN_RATE = 1.25; // rad/s (1.1-1.4 tight turn cap so perpendicular dodge-roll overshoots)
 export const ABB_ICBM_BLAST_RADIUS = 112;
 const CONTACT_DAMAGE = 28;
+
+/**
+ * Milestone 4.16: Sector-scaled ABB ICBM salvo count.
+ * Sector 1 (sectorIndex 0) -> 3 missiles, Sector 2 -> 4, Sector 3 -> 5, up to 8.
+ */
+export function getAbbSalvoCount(sectorIndex = 0): number {
+  const sectorNum = Math.max(1, Math.floor(sectorIndex) + 1);
+  return Math.min(8, 2 + sectorNum);
+}
 
 /**
  * Milestone 4.14: True guided steering for ABB ICBM missiles.
@@ -72,8 +81,10 @@ let abbSeq = 0;
  * Uses rapid dodge-dash repositioning (burst speed + afterimage trail), then
  * halts briefly and launches a 360-degree ring of guided homing missiles.
  */
-export function createAbb(x: number, y: number): BossState {
+export function createAbb(x: number, y: number, sectorIndex = 0): BossState {
   abbSeq += 1;
+  const safeSector = Math.max(0, Math.floor(sectorIndex));
+  const shields = computeBossShieldConfig(ABB_MAX_HP, safeSector);
   return {
     id: `boss_abb_${abbSeq}`,
     kind: 'abb',
@@ -106,6 +117,8 @@ export function createAbb(x: number, y: number): BossState {
     ],
     bladeAngle: 0,
     bladeRadius: 0,
+    sectorIndex: safeSector,
+    ...shields,
     dashTimer: 0,
     dashDirX: 0,
     dashDirY: 0,
@@ -226,7 +239,8 @@ export function updateAbb(
     const launchAt = HALT_LAUNCH_DURATION * 0.55;
     if (prevTimer > launchAt && boss.phaseTimer <= launchAt) {
       boss.fireAnimTimer = BOSS_FIRE_ANIM_SEC;
-      const count = common.rampaging ? MISSILE_RING_COUNT + 4 : MISSILE_RING_COUNT;
+      const baseCount = getAbbSalvoCount(boss.sectorIndex ?? 0);
+      const count = common.rampaging ? Math.min(8, baseCount + 2) : baseCount;
       spawned.push(...spawnHomingMissileRing(boss, player, count));
       events.push({ type: 'sfx', sound: 'shoot', x: boss.x, y: boss.y });
       events.push({ type: 'camera_shake', magnitude: 8, duration: 0.22 });

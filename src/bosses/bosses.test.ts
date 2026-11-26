@@ -282,6 +282,9 @@ describe('Maximilian (Whirling Blades Boss)', () => {
 describe('Recogniser (Destructible Legs -> Head, Sky-Slam & Sky-Bombs)', () => {
   it('blocks damage to head_core until both destructible legs are destroyed', () => {
     const boss = createRecogniser(500, 500);
+    // Clear universal Sector 1 shield to test part-level leg->head lock directly
+    boss.shieldLayers = 0;
+    boss.shieldHp = 0;
     const events: GameEvent[] = [];
 
     const head = boss.parts.find((p) => p.id === 'head_core')!;
@@ -559,7 +562,7 @@ describe('Milestone 4.11 — Boss Overhaul (2-Leg Recogniser, Multi-Layer Shield
 
 describe('Milestone 4.11 — Four New Bosses (ABB, Skullhead, Bug Hive, Brainbot)', () => {
   it('ABB performs dodge-dash repositioning then launches a 360-degree ring of homing missiles', () => {
-    const abb = createAbb(400, 400);
+    const abb = createAbb(400, 400, 5); // Sector 6 -> full 8-missile salvo ring
     const player = makePlayer(700, 400);
     const island = makeIsland({ crates: [] });
     const events: GameEvent[] = [];

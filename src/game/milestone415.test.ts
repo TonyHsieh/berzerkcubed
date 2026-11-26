@@ -122,7 +122,7 @@ describe('M4.15 — early Evil Otto alarm', () => {
   it('keeps the spec default delay but honours explicitly short warning windows', () => {
     const spec = computeOttoAlarmTiming(createDifficultyConfig());
     expect(spec.delaySec).toBe(4);
-    expect(spec.totalCountdownSec).toBe(41);
+    expect(spec.totalCountdownSec).toBe(10);
     const legacy = computeOttoAlarmTiming(
       createDifficultyConfig({ ottoWarningSec: 1.0, ottoAlarmStartDelaySec: 4 }),
     );

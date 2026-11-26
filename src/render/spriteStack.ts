@@ -36,6 +36,24 @@ const DEG2RAD = Math.PI / 180;
 /** Milestone 4.13: 3/4 arcade camera pitch vertical foreshortening factor. */
 export const DEFAULT_SLICE_PITCH_Y = 0.64;
 
+/** Milestone 4.16: Taller vertical stack spacing multiplier (~1.42x) for all non-Recogniser characters. */
+export const CHARACTER_HEIGHT_MULTIPLIER = 1.42;
+export const RECOGNISER_HEIGHT_MULTIPLIER = 1.0;
+
+/**
+ * Returns the vertical stack spacing multiplier for an entity kind.
+ * Recogniser (and static props like crates/walls) remain at 1.0x; all other
+ * characters (Hero, Enforcers, V-Bots, Shooters, Grenadiers, and non-Recogniser bosses)
+ * receive ~1.42x taller vertical presence.
+ */
+export function getEntitySpacingMultiplier(kind: string): number {
+  const k = kind.toLowerCase();
+  if (k === 'recogniser' || k === 'crate' || k === 'wall') {
+    return RECOGNISER_HEIGHT_MULTIPLIER;
+  }
+  return CHARACTER_HEIGHT_MULTIPLIER;
+}
+
 /** Dynamic per-layer renderer (Hero, bosses, rotating pickups). */
 export function drawStack(
   ctx: CanvasRenderingContext2D,

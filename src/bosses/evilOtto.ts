@@ -9,6 +9,7 @@ import type {
 import {
   applyBossDamageToPlayer,
   BOSS_FIRE_ANIM_SEC,
+  computeBossShieldConfig,
   nextBossProjectileId,
   stepBossCommonTimers,
 } from './bossUtils';
@@ -32,9 +33,9 @@ const OTTO_VARIANTS: OttoVariantSpec[] = [
     baseRadius: 26,
     baseHp: 500,
     pursueSpeed: 165,
-    taunt: 'BEWARE! I LIVE! RUN, COWARD!',
-    pitch: 0.35,
-    rate: 0.78,
+    taunt: 'BEWARE! EXTERMINATE THE HUMANOID!',
+    pitch: 1.0,
+    rate: 1.0,
     color: '#ffe600',
   },
   {
@@ -43,9 +44,9 @@ const OTTO_VARIANTS: OttoVariantSpec[] = [
     baseRadius: 30,
     baseHp: 700,
     pursueSpeed: 180,
-    taunt: 'BEWARE! VOLT-OTTO LIVES! SURGE AND BURN!',
-    pitch: 0.48,
-    rate: 0.85,
+    taunt: 'BEWARE! VOLT-OTTO LIVES! EXTERMINATE!',
+    pitch: 1.04,
+    rate: 1.04,
     color: '#00f0ff',
   },
   {
@@ -54,9 +55,9 @@ const OTTO_VARIANTS: OttoVariantSpec[] = [
     baseRadius: 34,
     baseHp: 900,
     pursueSpeed: 170,
-    taunt: 'BEWARE! CRYO-OTTO LIVES! FREEZE IN THE VOID!',
-    pitch: 0.3,
-    rate: 0.72,
+    taunt: 'I SENSE YOU! FREEZE IN THE VOID!',
+    pitch: 0.96,
+    rate: 0.98,
     color: '#66f3ff',
   },
   {
@@ -65,9 +66,9 @@ const OTTO_VARIANTS: OttoVariantSpec[] = [
     baseRadius: 38,
     baseHp: 1150,
     pursueSpeed: 192,
-    taunt: 'BEWARE! VORTEX-OTTO LIVES! NOTHING ESCAPES!',
-    pitch: 0.25,
-    rate: 0.75,
+    taunt: 'EXTERMINATE THE HUMANOID! NOTHING ESCAPES!',
+    pitch: 1.02,
+    rate: 1.02,
     color: '#c84bff',
   },
 ];
@@ -110,6 +111,7 @@ export function createEvilOtto(
 
   const radius = spec.baseRadius + cycle * 4;
   const maxHp = spec.baseHp + cycle * 250;
+  const shields = computeBossShieldConfig(maxHp, safeSector);
 
   return {
     id: `boss_otto_${spec.variant}_${ottoSeq}`,
@@ -143,6 +145,8 @@ export function createEvilOtto(
     ],
     bladeAngle: 0,
     bladeRadius: 0,
+    sectorIndex: safeSector,
+    ...shields,
     ottoVariant: spec.variant,
     reconstructing: true,
     hitFlash: 0,

@@ -19,6 +19,8 @@ export interface HudController {
   update(state: GameState): void;
   toggleTuningPanel(): void;
   isTuningOpen(): boolean;
+  setPauseSelection?(index: number): void;
+  getPauseSelection?(): number;
   destroy(): void;
 }
 
@@ -190,7 +192,7 @@ export function createHud(
   ottoAlarmBanner.innerHTML = `
     <div style="font-size:13px;font-weight:bold;color:#fef08a;letter-spacing:2px;text-shadow:0 0 10px #ef4444;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
       <span>⚠ EVIL OTTO APPROACHING — EXIT NOW!</span>
-      <span id="hud-otto-timer" style="color:#f87171;font-size:14px;">41.0s</span>
+      <span id="hud-otto-timer" style="color:#f87171;font-size:14px;">10.0s</span>
     </div>
     <div style="height:8px;background:#1f0a10;border:1px solid #f59e0b;overflow:hidden;">
       <div id="hud-otto-bar" style="height:100%;width:100%;background:linear-gradient(90deg,#ef4444,#f59e0b);transition:width 80ms linear;"></div>
@@ -206,7 +208,7 @@ export function createHud(
   pauseModal.innerHTML = `
     <div style="width:340px;max-width:90vw;text-align:center;border:2px solid #22d3ee;background:rgba(7,11,22,0.96);padding:26px 28px;box-shadow:0 0 32px rgba(34,211,238,0.4);">
       <div style="font-size:26px;font-weight:bold;color:#22d3ee;letter-spacing:6px;text-shadow:0 0 14px #22d3ee;margin-bottom:6px;">PAUSED</div>
-      <div style="font-size:10px;color:#94a3b8;letter-spacing:2px;margin-bottom:18px;">USE ↑/↓ + ENTER OR CLICK</div>
+      <div style="font-size:10px;color:#94a3b8;letter-spacing:2px;margin-bottom:18px;">USE ↑/↓ / D-PAD + ENTER / A OR CLICK</div>
       <div style="display:flex;flex-direction:column;gap:10px;">
         <button id="pause-resume" data-pause-idx="0" style="background:#0f172a;color:#e2e8f0;border:1px solid #38bdf8;padding:10px 14px;font:inherit;font-size:13px;letter-spacing:2px;cursor:pointer;">RESUME [ESC]</button>
         <button id="pause-restart" data-pause-idx="1" style="background:#0f172a;color:#e2e8f0;border:1px solid #38bdf8;padding:10px 14px;font:inherit;font-size:13px;letter-spacing:2px;cursor:pointer;">RESTART RUN</button>
@@ -534,19 +536,20 @@ export function createHud(
         bossHpEl.textContent = `${Math.ceil(b.hp)} / ${b.maxHp}`;
         bossBarEl.style.width = `${Math.max(0, Math.min(100, (b.hp / Math.max(1, b.maxHp)) * 100))}%`;
 
-        // Milestone 4.11: blade-shield or higher-sector multi-layer segmented shields + Rampage banner
+        // Milestone 4.16: Universal segmented boss shield bar (shown until broken)
         const shieldMax = b.shieldMaxHp ?? 0;
+        const shieldCur = b.shieldHp ?? 0;
         const maxLayers = b.maxShieldLayers ?? 0;
         const curLayers = b.shieldLayers ?? 0;
-        const hasShield = shieldMax > 0 || maxLayers > 0;
-        bossShieldRowEl.style.display = hasShield ? 'block' : 'none';
-        bossShieldTrackEl.style.display = hasShield ? 'block' : 'none';
-        if (hasShield) {
+        const shieldActive = (curLayers > 0 && shieldCur > 0) || (maxLayers === 0 && shieldCur > 0);
+        bossShieldRowEl.style.display = shieldActive ? 'block' : 'none';
+        bossShieldTrackEl.style.display = shieldActive ? 'block' : 'none';
+        if (shieldActive) {
           const layerSuffix = maxLayers > 0 ? ` · LAYERS ${curLayers}/${maxLayers}` : '';
-          bossShieldValEl.textContent = `${Math.ceil(b.shieldHp ?? 0)} / ${shieldMax}${layerSuffix}`;
-          bossShieldBarEl.style.width = `${Math.max(0, Math.min(100, ((b.shieldHp ?? 0) / Math.max(1, shieldMax)) * 100))}%`;
+          bossShieldValEl.textContent = `${Math.ceil(shieldCur)} / ${shieldMax}${layerSuffix}`;
+          bossShieldBarEl.style.width = `${Math.max(0, Math.min(100, (shieldCur / Math.max(1, shieldMax)) * 100))}%`;
         }
-        if (maxLayers > 0) {
+        if (shieldActive && maxLayers > 0) {
           bossShieldLayersEl.style.display = 'flex';
           bossShieldLayersEl.innerHTML = Array.from({ length: maxLayers }, (_, idx) => {
             const active = idx < curLayers;
@@ -596,6 +599,16 @@ export function createHud(
 
     isTuningOpen(): boolean {
       return tuningOpen;
+    },
+
+    setPauseSelection(index: number): void {
+      const n = pauseButtons.length;
+      pauseSelection = ((Math.floor(index) % n) + n) % n;
+      updatePauseFocusStyles();
+    },
+
+    getPauseSelection(): number {
+      return pauseSelection;
     },
 
     destroy(): void {

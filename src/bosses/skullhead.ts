@@ -11,6 +11,7 @@ import { raycastSolidWalls } from '../world/worldSim';
 import {
   applyBossDamageToPlayer,
   BOSS_FIRE_ANIM_SEC,
+  computeBossShieldConfig,
   nextBossProjectileId,
   stepBossCommonTimers,
 } from './bossUtils';
@@ -123,6 +124,7 @@ let skullSeq = 0;
  */
 export function createSkullhead(x: number, y: number): BossState {
   skullSeq += 1;
+  const shields = computeBossShieldConfig(SKULLHEAD_MAX_HP, 0);
   return {
     id: `boss_skullhead_${skullSeq}`,
     kind: 'skullhead',
@@ -155,6 +157,7 @@ export function createSkullhead(x: number, y: number): BossState {
     ],
     bladeAngle: 0,
     bladeRadius: 0,
+    ...shields,
     laserTelegraphTimer: 0,
     laserActiveTimer: 0,
     laserSweepAngle: 0,

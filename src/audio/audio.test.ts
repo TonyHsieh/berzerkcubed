@@ -20,9 +20,9 @@ describe('SoundEngine (headless, un-initialized)', () => {
 });
 
 describe('voice taunts', () => {
-  it('has distinct presets and Otto is deepest/slowest', () => {
+  it('has distinct presets and Otto uses screechy high-pitched Dalek preset', () => {
     expect(new Set(Object.values(VOICE_PRESETS).map((p) => p.pitchMul)).size).toBe(4);
-    expect(VOICE_PRESETS.evil_otto.pitchMul).toBeLessThan(VOICE_PRESETS.maximilian.pitchMul);
+    expect(VOICE_PRESETS.evil_otto.pitchMul).toBeGreaterThanOrEqual(1.7);
   });
   it('normalizes speaker names and falls back to enforcer', () => {
     expect(normalizeSpeaker('Evil Otto')).toBe('evil_otto');
@@ -32,7 +32,7 @@ describe('voice taunts', () => {
     const r = resolveTauntParams('enforcer', 100, 100);
     expect(r.pitch).toBe(2);
     expect(r.rate).toBe(4);
-    expect(resolveTauntParams('evil_otto', 1, 1).pitch).toBeCloseTo(0.35);
+    expect(resolveTauntParams('evil_otto', 1, 1).pitch).toBeCloseTo(1.8);
   });
   it('uses Web Speech API when available', () => {
     const spoken: Array<{ pitch: number; rate: number }> = [];

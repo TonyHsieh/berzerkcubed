@@ -23,7 +23,11 @@ import {
   enemyCacheKey,
   type ModelSet,
 } from '../render/models';
-import { drawStack, SpriteStackCache } from '../render/spriteStack';
+import {
+  drawStack,
+  getEntitySpacingMultiplier,
+  SpriteStackCache,
+} from '../render/spriteStack';
 import { VfxSystem } from '../render/vfx';
 import type { GameState } from './gameState';
 
@@ -657,6 +661,7 @@ function drawHero(
 ): void {
   const camAngle = camera.angleDeg;
   const baseZ = player.z * zScale;
+  const heroSpacing = spacingPx * getEntitySpacingMultiplier('hero');
 
   // Ground shadow
   ctx.save();
@@ -698,11 +703,11 @@ function drawHero(
     camAngle,
     SPRITE_SCALE,
     baseZ,
-    spacingPx,
+    heroSpacing,
   );
 
   // 2. Z-interleaved torso + weapon using rifleScreenRelY depth check
-  const torsoStartZ = baseZ + legSlices.length * spacingPx;
+  const torsoStartZ = baseZ + legSlices.length * heroSpacing;
   const weaponSlices =
     models.hero.weaponStacks[player.weapon.primary] ??
     models.hero.weaponStacks.pulse_rifle;
@@ -719,8 +724,8 @@ function drawHero(
       player.aimAngle,
       camAngle,
       SPRITE_SCALE,
-      torsoStartZ + spacingPx,
-      spacingPx,
+      torsoStartZ + heroSpacing,
+      heroSpacing,
       0,
       recoilY,
     );
@@ -733,7 +738,7 @@ function drawHero(
       camAngle,
       SPRITE_SCALE,
       torsoStartZ,
-      spacingPx,
+      heroSpacing,
     );
   } else {
     drawStack(
@@ -745,7 +750,7 @@ function drawHero(
       camAngle,
       SPRITE_SCALE,
       torsoStartZ,
-      spacingPx,
+      heroSpacing,
     );
     drawStack(
       ctx,
@@ -755,8 +760,8 @@ function drawHero(
       player.aimAngle,
       camAngle,
       SPRITE_SCALE,
-      torsoStartZ + spacingPx,
-      spacingPx,
+      torsoStartZ + heroSpacing,
+      heroSpacing,
       0,
       recoilY,
     );
@@ -1000,8 +1005,24 @@ function drawBoss(
       : 'brightness(3.5) contrast(1.4)';
   }
 
+  const bossSpacing = spacingPx * getEntitySpacingMultiplier(boss.kind);
+
   if (boss.kind === 'maximilian') {
     const scale = 4.8;
+    const extend = Math.max(
+      0,
+      Math.min(
+        1,
+        boss.bladeExtend ??
+          (boss.phase === 'whirlwind'
+            ? 1
+            : boss.phase === 'charge'
+              ? 0.78
+              : boss.phase === 'recover'
+                ? 0
+                : 0.35),
+      ),
+    );
     drawStack(
       ctx,
       models.maximilian.body,
@@ -1011,8 +1032,58 @@ function drawBoss(
       camAngle,
       scale,
       zLift,
-      spacingPx * 1.5,
+      bossSpacing * 1.5,
     );
+    // Milestone 4.16: Extending spinning voxel sawblade arms reaching outward to full melee bladeRadius
+    const bladeScale = scale * (1.05 + extend * 0.52);
+    const bladeCenterY = screenY - zLift - 6 * bossSpacing;
+    if (extend > 0.08) {
+      const armReach = Math.max(28, 32 + extend * (boss.bladeRadius - 32));
+      const bladeRad = ((boss.bladeAngle + camAngle) * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(screenX, bladeCenterY);
+      ctx.rotate(bladeRad);
+      // Extending twin hydraulic arm struts
+      ctx.strokeStyle = '#94a3b8';
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(-armReach, 0);
+      ctx.lineTo(armReach, 0);
+      ctx.stroke();
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-armReach, 0);
+      ctx.lineTo(armReach, 0);
+      ctx.stroke();
+      // Extended outer whirling sawblade discs at full melee reach
+      const discR = 11 + extend * 7;
+      for (const side of [-1, 1]) {
+        const bx = side * armReach;
+        ctx.save();
+        ctx.translate(bx, 0);
+        ctx.rotate(bladeRad * 2.5);
+        ctx.shadowColor = '#ef4444';
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = '#e2e8f0';
+        ctx.beginPath();
+        const teeth = 8;
+        for (let t = 0; t < teeth * 2; t++) {
+          const a = (t * Math.PI) / teeth;
+          const r = t % 2 === 0 ? discR : discR * 0.62;
+          if (t === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+          else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(0, 0, discR * 0.34, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
     drawStack(
       ctx,
       models.maximilian.blades,
@@ -1020,9 +1091,9 @@ function drawBoss(
       screenY,
       boss.bladeAngle,
       camAngle,
-      scale * 1.15,
-      zLift + 6 * spacingPx,
-      spacingPx * 1.2,
+      bladeScale,
+      zLift + 6 * bossSpacing,
+      bossSpacing * 1.2,
     );
     // Whirling blade danger halo
     ctx.save();
@@ -1173,7 +1244,7 @@ function drawBoss(
       camAngle,
       scale,
       zLift,
-      spacingPx * 1.5,
+      bossSpacing * 1.5,
     );
   } else if (boss.kind === 'skullhead') {
     const scale = 4.8;
@@ -1186,7 +1257,7 @@ function drawBoss(
       camAngle,
       scale,
       zLift,
-      spacingPx * 1.5,
+      bossSpacing * 1.5,
     );
     // Tiny spinning propeller hat perched cleanly on the very top of the dome
     ctx.save();
@@ -1199,8 +1270,8 @@ function drawBoss(
       boss.bladeAngle,
       camAngle,
       scale * 0.85,
-      zLift + models.skullhead.body.length * spacingPx * 1.5,
-      spacingPx,
+      zLift + models.skullhead.body.length * bossSpacing * 1.5,
+      bossSpacing,
     );
     ctx.restore();
 
@@ -1302,7 +1373,7 @@ function drawBoss(
       camAngle,
       scale,
       zLift,
-      spacingPx * 1.5,
+      bossSpacing * 1.5,
     );
     // Draw orbiting & swooping Flying Bug Bots
     const bugs = boss.orbitingBugs ?? [];
@@ -1320,7 +1391,7 @@ function drawBoss(
         camAngle,
         2.2,
         16 * zScale,
-        spacingPx,
+        bossSpacing,
       );
     }
   } else if (boss.kind === 'brainbot') {
@@ -1334,14 +1405,32 @@ function drawBoss(
       camAngle,
       scale,
       zLift,
-      spacingPx * 1.5,
+      bossSpacing * 1.5,
     );
-    // Translucent cyan neural glass dome shimmer
+    // Milestone 4.16: Glossy spherical translucent glass dome rim & specular highlight arcs
+    const domeCenterY = screenY - zLift - 58;
+    const domeR = 42;
     ctx.save();
-    ctx.strokeStyle = 'rgba(103, 232, 249, 0.55)';
-    ctx.lineWidth = 2;
+    ctx.fillStyle = 'rgba(103, 232, 249, 0.14)';
     ctx.beginPath();
-    ctx.arc(screenX, screenY - zLift - 34, 34, 0, Math.PI * 2);
+    ctx.arc(screenX, domeCenterY, domeR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowColor = '#67e8f9';
+    ctx.shadowBlur = 14;
+    ctx.strokeStyle = 'rgba(224, 242, 254, 0.78)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(screenX, domeCenterY, domeR, 0, Math.PI * 2);
+    ctx.stroke();
+    // Glossy specular highlight arcs
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(screenX, domeCenterY, domeR - 6, -Math.PI * 0.82, -Math.PI * 0.42);
+    ctx.stroke();
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(screenX, domeCenterY, domeR - 12, -Math.PI * 0.78, -Math.PI * 0.56);
     ctx.stroke();
     ctx.restore();
   } else {
@@ -1361,7 +1450,7 @@ function drawBoss(
       camAngle,
       scale,
       zLift,
-      spacingPx * 1.5,
+      bossSpacing * 1.5,
     );
     if (boss.reconstructing) {
       ctx.strokeStyle = '#fde047';
@@ -1427,15 +1516,30 @@ function drawBoss(
     );
   }
 
-  // Higher-sector multi-layer shield rings
-  if ((boss.shieldLayers ?? 0) > 0 && !rezzing) {
+  // Milestone 4.16: Universal neon shield aura/barrier for every shielded boss
+  if ((boss.shieldLayers ?? 0) > 0 && (boss.shieldHp ?? 0) > 0 && !rezzing) {
     ctx.save();
-    const layers = boss.shieldLayers ?? 0;
+    const layers = boss.shieldLayers ?? 1;
+    const shieldFrac = Math.max(
+      0.15,
+      Math.min(1, (boss.shieldHp ?? 0) / Math.max(1, boss.shieldMaxHp ?? 1)),
+    );
+    const pulse = 0.72 + 0.28 * Math.sin(elapsedTime * 8);
+    const outerR = boss.radius + 10 + (layers - 1) * 7;
+    ctx.fillStyle = `rgba(34, 211, 238, ${(0.08 + shieldFrac * 0.08 * pulse).toFixed(2)})`;
+    ctx.beginPath();
+    ctx.arc(screenX, screenY - zLift - 24, outerR, 0, Math.PI * 2);
+    ctx.fill();
     for (let l = 0; l < layers; l++) {
-      ctx.strokeStyle = l === layers - 1 ? '#22d3ee' : 'rgba(56, 189, 248, 0.45)';
-      ctx.lineWidth = l === layers - 1 ? 2.5 : 1.5;
+      const isOuter = l === layers - 1;
+      ctx.shadowColor = '#22d3ee';
+      ctx.shadowBlur = isOuter ? 16 : 6;
+      ctx.strokeStyle = isOuter
+        ? `rgba(34, 211, 238, ${(0.55 + shieldFrac * 0.45 * pulse).toFixed(2)})`
+        : 'rgba(56, 189, 248, 0.5)';
+      ctx.lineWidth = isOuter ? 3 : 1.5;
       ctx.beginPath();
-      ctx.arc(screenX, screenY - zLift - 20, boss.radius + 10 + l * 7, 0, Math.PI * 2);
+      ctx.arc(screenX, screenY - zLift - 24, boss.radius + 10 + l * 7, 0, Math.PI * 2);
       ctx.stroke();
     }
     ctx.restore();
@@ -1897,6 +2001,13 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
     update(dt: number, state: GameState): void {
       circuitBg.update(dt);
       vfx.update(dt);
+
+      // Milestone 4.16: Smoothly scale Boss Danger music tempo as active boss HP drops 1.0 -> 0.0
+      if (state.boss && state.boss.hp > 0 && state.boss.maxHp > 0) {
+        sound.setBossHpRatio(state.boss.hp / state.boss.maxHp);
+      } else {
+        sound.setBossHpRatio(1);
+      }
 
       if (state.player.dodgeTimer > 0) {
         vfx.afterimage(

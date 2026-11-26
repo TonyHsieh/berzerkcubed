@@ -383,6 +383,10 @@ export interface BossState {
   // Maximilian blade spin / blade-shield meter
   bladeAngle: number;
   bladeRadius: number;
+  /** Milestone 4.16: smooth 0..1 blade extension factor (retracted -> stalk -> charge -> whirlwind). */
+  bladeExtend?: number;
+  /** Milestone 4.16: 0-based sector index at boss spawn (for sector-scaled attacks like ABB salvo). */
+  sectorIndex?: number;
   shieldHp?: number;
   shieldMaxHp?: number;
   /** True while the boss can be damaged (blades retracted / shield broken). */
@@ -464,6 +468,8 @@ export interface DifficultyConfig {
   ottoWarningSec: number;
   /** Milestone 4.15: delay (s) after boss death explosion before Evil Otto alarm starts. */
   ottoAlarmStartDelaySec: number;
+  /** Milestone 4.16: Evil Otto visible alarm countdown duration (seconds, default 10.0). */
+  ottoCountdownSec: number;
   playerMaxHp: number;
   playerMaxShield: number;
   shieldRegenRate: number;

@@ -51,6 +51,11 @@ export interface GamepadSnapshot {
   start?: boolean;
   /** Milestone 4.15: true if any gamepad button is currently pressed. */
   anyButtonPressed?: boolean;
+  /** Milestone 4.16: Pause Menu navigation fields (W3C standard mapping). */
+  dpadUp?: boolean;
+  dpadDown?: boolean;
+  confirm?: boolean; // A / Cross (button 0)
+  cancel?: boolean; // B / Circle (button 1)
 }
 
 /** Standard-mapping stick deadzone (Xbox / PlayStation / 8BitDo). */
@@ -86,6 +91,10 @@ export function parseGamepadSnapshot(
   const rightBumper = down(5);
   const dpadLeft = down(12);
   const dpadRight = down(13);
+  const dpadUp = down(12);
+  const dpadDown = down(13);
+  const confirm = down(0);
+  const cancel = down(1);
   const start = down(9);
   const anyButtonPressed = pad.buttons.some((b) => Boolean(b && (b.pressed || b.value > 0.5)));
 
@@ -101,6 +110,140 @@ export function parseGamepadSnapshot(
     swivelDir: dpadRight && !dpadLeft ? 1 : dpadLeft && !dpadRight ? -1 : 0,
     start,
     anyButtonPressed,
+    dpadUp,
+    dpadDown,
+    confirm,
+    cancel,
+  };
+}
+
+// ---------- Milestone 4.16: Headless-Testable Gamepad Pause Menu Navigation ----------
+
+export type PauseMenuAction = 'resume' | 'restart' | 'gallery' | 'quit';
+
+export const PAUSE_MENU_ITEMS: readonly PauseMenuAction[] = [
+  'resume',
+  'restart',
+  'gallery',
+  'quit',
+];
+
+export interface PauseMenuNavInput {
+  up: boolean;
+  down: boolean;
+  confirm: boolean;
+  cancel: boolean;
+  start: boolean;
+}
+
+export interface PauseMenuNavResult {
+  selectedIndex: number;
+  activated: PauseMenuAction | null;
+  closed: boolean;
+}
+
+export interface PauseMenuNavController {
+  getSelectedIndex(): number;
+  setSelectedIndex(index: number): void;
+  reset(initialInput?: Partial<PauseMenuNavInput>): void;
+  poll(input: PauseMenuNavInput, dt: number): PauseMenuNavResult;
+}
+
+const PAUSE_NAV_STICK_THRESHOLD = 0.5;
+const PAUSE_NAV_REPEAT_INITIAL_SEC = 0.32;
+const PAUSE_NAV_REPEAT_INTERVAL_SEC = 0.14;
+
+/** Pure helper converting a parsed GamepadSnapshot into Pause Menu nav inputs. */
+export function gamepadSnapshotToPauseNavInput(
+  snap: GamepadSnapshot,
+): PauseMenuNavInput {
+  return {
+    up: Boolean(snap.dpadUp) || snap.moveY < -PAUSE_NAV_STICK_THRESHOLD,
+    down: Boolean(snap.dpadDown) || snap.moveY > PAUSE_NAV_STICK_THRESHOLD,
+    confirm: Boolean(snap.confirm),
+    cancel: Boolean(snap.cancel),
+    start: Boolean(snap.start),
+  };
+}
+
+/**
+ * Pure, headless-testable Pause Menu navigation controller with edge-trigger
+ * and hold-repeat debounce for D-Pad / Left Stick Up/Down, A confirm, and Start/B exit.
+ */
+export function createPauseMenuNav(
+  items: readonly PauseMenuAction[] = PAUSE_MENU_ITEMS,
+): PauseMenuNavController {
+  const count = Math.max(1, items.length);
+  let selectedIndex = 0;
+  let prevDir: -1 | 0 | 1 = 0;
+  let repeatTimer = 0;
+  let prevConfirm = false;
+  let prevCancel = false;
+  let prevStart = false;
+
+  const wrap = (idx: number): number => ((idx % count) + count) % count;
+
+  return {
+    getSelectedIndex(): number {
+      return selectedIndex;
+    },
+
+    setSelectedIndex(index: number): void {
+      selectedIndex = wrap(Math.floor(index));
+    },
+
+    reset(initialInput?: Partial<PauseMenuNavInput>): void {
+      selectedIndex = 0;
+      const up = Boolean(initialInput?.up);
+      const down = Boolean(initialInput?.down);
+      prevDir = up && !down ? -1 : down && !up ? 1 : 0;
+      repeatTimer = PAUSE_NAV_REPEAT_INITIAL_SEC;
+      prevConfirm = Boolean(initialInput?.confirm);
+      prevCancel = Boolean(initialInput?.cancel);
+      prevStart = Boolean(initialInput?.start);
+    },
+
+    poll(input: PauseMenuNavInput, dt: number): PauseMenuNavResult {
+      const safeDt = Math.max(0, dt);
+      const dir: -1 | 0 | 1 =
+        input.up && !input.down ? -1 : input.down && !input.up ? 1 : 0;
+
+      if (dir !== 0) {
+        if (dir !== prevDir) {
+          selectedIndex = wrap(selectedIndex + dir);
+          repeatTimer = PAUSE_NAV_REPEAT_INITIAL_SEC;
+        } else {
+          repeatTimer -= safeDt;
+          if (repeatTimer <= 0) {
+            selectedIndex = wrap(selectedIndex + dir);
+            repeatTimer += PAUSE_NAV_REPEAT_INTERVAL_SEC;
+          }
+        }
+      } else {
+        repeatTimer = 0;
+      }
+      prevDir = dir;
+
+      const startEdge = input.start && !prevStart;
+      const cancelEdge = input.cancel && !prevCancel;
+      const confirmEdge = input.confirm && !prevConfirm;
+
+      prevStart = input.start;
+      prevCancel = input.cancel;
+      prevConfirm = input.confirm;
+
+      if (startEdge || cancelEdge) {
+        return { selectedIndex, activated: null, closed: true };
+      }
+      if (confirmEdge) {
+        return {
+          selectedIndex,
+          activated: items[selectedIndex] ?? 'resume',
+          closed: false,
+        };
+      }
+      return { selectedIndex, activated: null, closed: false };
+    },
   };
 }
 

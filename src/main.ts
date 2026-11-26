@@ -121,6 +121,52 @@ async function boot(): Promise<void> {
   window.addEventListener('pointerdown', unlockAudio, { once: true });
   window.addEventListener('keydown', unlockAudio, { once: true });
 
+  const openGalleryFromPause = () => {
+    if (activeGallery) return;
+    void import('./game/gallery').then(({ createModelGallery }) => {
+      activeGallery = createModelGallery(
+        { models, cache },
+        {
+          closeLabel: 'BACK TO PAUSE [ESC]',
+          onClose: () => {
+            activeGallery?.destroy();
+            activeGallery = null;
+          },
+        },
+      );
+    });
+  };
+
+  const doResumeFromPause = () => {
+    if (state.phase === 'paused') {
+      gameStateMod.resumeGame(state);
+      renderer.sound.setPaused(false);
+    }
+  };
+
+  const doQuitToTitle = () => {
+    if (activeGallery) {
+      activeGallery.destroy();
+      activeGallery = null;
+    }
+    renderer.sound.setPaused(false);
+    renderer.sound.fadeOutMusic(0.6);
+    resetToFreshSector1('title');
+  };
+
+  const doRestartRun = () => {
+    if (activeGallery) {
+      activeGallery.destroy();
+      activeGallery = null;
+    }
+    resetToFreshSector1('playing');
+    renderer.sound.setPaused(false);
+    void renderer.initAudio().then(() => {
+      renderer.sound.fadeInLevelMusic(1.2);
+    });
+    renderer.sound.fadeInLevelMusic(1.2);
+  };
+
   const hud = hudMod.createHud({
     onSpawnBoss: (kind) => {
       gameStateMod.spawnBoss(state, kind, { rezDuration: 1.0 });
@@ -132,48 +178,10 @@ async function boot(): Promise<void> {
     onStartGame: () => {
       launchFromTitle();
     },
-    onResume: () => {
-      if (state.phase === 'paused') {
-        gameStateMod.resumeGame(state);
-        renderer.sound.setPaused(false);
-      }
-    },
-    onOpenGallery: () => {
-      if (activeGallery) return;
-      void import('./game/gallery').then(({ createModelGallery }) => {
-        activeGallery = createModelGallery(
-          { models, cache },
-          {
-            closeLabel: 'BACK TO PAUSE [ESC]',
-            onClose: () => {
-              activeGallery?.destroy();
-              activeGallery = null;
-            },
-          },
-        );
-      });
-    },
-    onQuitToTitle: () => {
-      if (activeGallery) {
-        activeGallery.destroy();
-        activeGallery = null;
-      }
-      renderer.sound.setPaused(false);
-      renderer.sound.fadeOutMusic(0.6);
-      resetToFreshSector1('title');
-    },
-    onRestart: () => {
-      if (activeGallery) {
-        activeGallery.destroy();
-        activeGallery = null;
-      }
-      resetToFreshSector1('playing');
-      renderer.sound.setPaused(false);
-      void renderer.initAudio().then(() => {
-        renderer.sound.fadeInLevelMusic(1.2);
-      });
-      renderer.sound.fadeInLevelMusic(1.2);
-    },
+    onResume: doResumeFromPause,
+    onOpenGallery: openGalleryFromPause,
+    onQuitToTitle: doQuitToTitle,
+    onRestart: doRestartRun,
     onToggleCrt: (enabled) => {
       renderer.vfx.crtEnabled = enabled;
     },
@@ -196,9 +204,11 @@ async function boot(): Promise<void> {
   let lastTimeMs = performance.now();
   let accumulator = 0;
   let prevPadStart = false;
+  let prevPadCancel = false;
   let prevPadAny = false;
+  const pauseNav = inputMod.createPauseMenuNav();
 
-  const pollGamepadFlowButtons = () => {
+  const pollGamepadFlowButtons = (dt: number) => {
     if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function') return;
     const pads = navigator.getGamepads();
     let pad = null;
@@ -210,18 +220,55 @@ async function boot(): Promise<void> {
     }
     if (!pad) {
       prevPadStart = false;
+      prevPadCancel = false;
       prevPadAny = false;
       return;
     }
     const snap = inputMod.parseGamepadSnapshot(pad);
     const startDown = Boolean(snap.start);
+    const cancelDown = Boolean(snap.cancel);
     const anyDown = Boolean(snap.anyButtonPressed);
-    if (state.phase === 'title' && anyDown && !prevPadAny) {
-      launchFromTitle();
-    } else if (state.phase !== 'title' && startDown && !prevPadStart) {
-      handleTogglePause();
+    const navInput = inputMod.gamepadSnapshotToPauseNavInput(snap);
+
+    if (activeGallery) {
+      // Milestone 4.16: Start (button 9) or B (button 1) exits Model Gallery back to Pause
+      if ((startDown && !prevPadStart) || (cancelDown && !prevPadCancel)) {
+        activeGallery.close?.();
+        pauseNav.reset(navInput);
+      }
+      prevPadStart = startDown;
+      prevPadCancel = cancelDown;
+      prevPadAny = anyDown;
+      return;
     }
+
+    if (state.phase === 'title') {
+      if (anyDown && !prevPadAny) {
+        launchFromTitle();
+      }
+    } else if (state.phase === 'paused') {
+      // Milestone 4.16: Full gamepad navigation in Pause Menu
+      const res = pauseNav.poll(navInput, dt);
+      hud.setPauseSelection?.(res.selectedIndex);
+      if (res.closed) {
+        doResumeFromPause();
+      } else if (res.activated === 'resume') {
+        doResumeFromPause();
+      } else if (res.activated === 'restart') {
+        doRestartRun();
+      } else if (res.activated === 'gallery') {
+        openGalleryFromPause();
+      } else if (res.activated === 'quit') {
+        doQuitToTitle();
+      }
+    } else if (startDown && !prevPadStart) {
+      handleTogglePause();
+      pauseNav.reset(navInput);
+      hud.setPauseSelection?.(0);
+    }
+
     prevPadStart = startDown;
+    prevPadCancel = cancelDown;
     prevPadAny = anyDown;
   };
 
@@ -229,7 +276,7 @@ async function boot(): Promise<void> {
     const frameDt = Math.min(0.1, Math.max(0, (nowMs - lastTimeMs) / 1000));
     lastTimeMs = nowMs;
 
-    pollGamepadFlowButtons();
+    pollGamepadFlowButtons(frameDt);
 
     if (state.phase === 'title') {
       // Animate parallax cyber-circuit background smoothly behind Title Screen

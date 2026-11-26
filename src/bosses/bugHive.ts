@@ -9,6 +9,7 @@ import type {
 import {
   applyBossDamageToPlayer,
   BOSS_FIRE_ANIM_SEC,
+  computeBossShieldConfig,
   nextBossProjectileId,
   stepBossCommonTimers,
 } from './bossUtils';
@@ -59,6 +60,7 @@ function makeOrbitingBug(
  */
 export function createBugHive(x: number, y: number): BossState {
   hiveSeq += 1;
+  const shields = computeBossShieldConfig(HIVE_MAX_HP, 0);
   const bugs: OrbitingBugBot[] = [];
   for (let i = 0; i < INITIAL_BUG_COUNT; i++) {
     bugs.push(makeOrbitingBug(x, y, (i / INITIAL_BUG_COUNT) * Math.PI * 2));
@@ -95,6 +97,7 @@ export function createBugHive(x: number, y: number): BossState {
     ],
     bladeAngle: 0,
     bladeRadius: 0,
+    ...shields,
     orbitingBugs: bugs,
     fireAnimTimer: 0,
     hitFlash: 0,

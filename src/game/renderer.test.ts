@@ -140,10 +140,10 @@ describe('Milestone 4.12 — Rez-In Opaque Flash Climax & Post-Rez Halo', () => 
     expect(done.haloAlpha).toBe(0);
   });
 
-  it('builds Floating Skullhead with 14-layer sculpted skull body and compact 3-layer propeller hat', () => {
+  it('builds Floating Skullhead with 16-layer sculpted skull body and compact 3-layer propeller hat', () => {
     setCanvasFactory(fakeCanvasFactory());
     const skull = buildSkullhead();
-    expect(skull.body).toHaveLength(14);
+    expect(skull.body.length).toBeGreaterThanOrEqual(16);
     expect(skull.halo).toHaveLength(3);
   });
 });

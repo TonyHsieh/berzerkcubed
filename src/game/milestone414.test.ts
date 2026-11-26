@@ -297,7 +297,7 @@ describe('Milestone 4.14 — Section 2: Maximilian (Thrown Sawblades & Layered A
 
 describe('Milestone 4.14 — Section 3: ABB (RoboTank) Guided ICBM Missiles', () => {
   it('launches ICBM missiles radially in 360° spread and steers with capped angular turn rate', () => {
-    const abb = createAbb(500, 500);
+    const abb = createAbb(500, 500, 5); // Sector 6 -> 8-missile full 360° salvo
     const state = createGameState();
     state.player.x = 850;
     state.player.y = 500;

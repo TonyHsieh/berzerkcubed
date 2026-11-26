@@ -19,10 +19,18 @@ import {
 
 const MAXIMILIAN_BASE_RADIUS = 48;
 const MAXIMILIAN_BLADE_RADIUS = 72;
+const MAXIMILIAN_CHARGE_BLADE_RADIUS = 82;
 const MAXIMILIAN_WHIRLWIND_BLADE_RADIUS = 88;
 const MAXIMILIAN_MAX_HP = 1200;
 const MAXIMILIAN_SHIELD_HP = 260;
 const STANDARD_SHOT_SHIELD_DAMAGE = 7;
+
+export function getMaximilianTargetBladeExtend(phase: string): number {
+  if (phase === 'whirlwind') return 1.0;
+  if (phase === 'charge') return 0.78;
+  if (phase === 'stalk') return 0.35;
+  return 0.0; // recover
+}
 
 const STALK_DURATION = 2.6;
 const CHARGE_DURATION = 1.3;
@@ -264,8 +272,14 @@ export function createMaximilian(x: number, y: number, sectorIndex = 0): BossSta
     ],
     bladeAngle: 0,
     bladeRadius: MAXIMILIAN_BLADE_RADIUS,
+    bladeExtend: 0.35,
+    sectorIndex: Math.max(0, Math.floor(sectorIndex)),
+    shieldLayers: 1,
+    maxShieldLayers: 1,
+    shieldLayerHp: MAXIMILIAN_SHIELD_HP,
     shieldHp: MAXIMILIAN_SHIELD_HP,
     shieldMaxHp: MAXIMILIAN_SHIELD_HP,
+    shieldRegenDelay: 0,
     vulnerable: false,
     sawbladeCooldown: 1.0,
     ablativePlates: createMaximilianAblativePlates(x, y, sectorIndex),
@@ -388,6 +402,22 @@ export function updateMaximilian(
     boss.vx += (dirX * RECOVER_SPEED - boss.vx) * blend;
     boss.vy += (dirY * RECOVER_SPEED - boss.vy) * blend;
     bladeSpinDegPerSec = 260;
+  }
+
+  // Milestone 4.16: Smooth bladeExtend (0..1) and melee bladeRadius telegraphing
+  const targetExtend = getMaximilianTargetBladeExtend(boss.phase);
+  const curExtend = boss.bladeExtend ?? targetExtend;
+  boss.bladeExtend = Math.max(
+    0,
+    Math.min(1, curExtend + (targetExtend - curExtend) * Math.min(1, dt * 8)),
+  );
+  if (boss.phase === 'charge') {
+    const targetRadius =
+      MAXIMILIAN_BLADE_RADIUS +
+      (MAXIMILIAN_CHARGE_BLADE_RADIUS - MAXIMILIAN_BLADE_RADIUS) * boss.bladeExtend;
+    boss.bladeRadius = Math.max(boss.bladeRadius, targetRadius);
+  } else if (boss.phase === 'whirlwind') {
+    boss.bladeRadius = MAXIMILIAN_WHIRLWIND_BLADE_RADIUS;
   }
 
   boss.bladeAngle = (boss.bladeAngle + bladeSpinDegPerSec * dt) % 360;

@@ -505,7 +505,7 @@ function createScaledBoss(
       boss = createRecogniser(x, y);
       break;
     case 'abb':
-      boss = createAbb(x, y);
+      boss = createAbb(x, y, sectorIndex);
       break;
     case 'skullhead':
       boss = createSkullhead(x, y);
@@ -1908,8 +1908,8 @@ export function stepGameState(
           {
             type: 'voice_taunt',
             text: 'BEWARE!',
-            pitch: 0.4,
-            rate: 0.78,
+            pitch: 1.0,
+            rate: 1.0,
             speaker: 'evil_otto',
           },
           { type: 'sfx', sound: 'otto_alarm', x: state.player.x, y: state.player.y },
@@ -1933,8 +1933,8 @@ export function stepGameState(
           {
             type: 'voice_taunt',
             text: 'I SENSE YOU!',
-            pitch: 0.38,
-            rate: 0.76,
+            pitch: 1.0,
+            rate: 1.0,
             speaker: 'evil_otto',
           },
           { type: 'sfx', sound: 'otto_alarm', x: state.player.x, y: state.player.y },
@@ -1946,9 +1946,9 @@ export function stepGameState(
         state.events.push(
           {
             type: 'voice_taunt',
-            text: 'THE HUMANOID MUST NOT ESCAPE!',
-            pitch: 0.36,
-            rate: 0.74,
+            text: 'EXTERMINATE THE HUMANOID!',
+            pitch: 1.0,
+            rate: 1.04,
             speaker: 'evil_otto',
           },
           { type: 'sfx', sound: 'otto_alarm', x: state.player.x, y: state.player.y },

@@ -16,39 +16,76 @@ export function nextBossProjectileId(prefix: string): string {
 }
 
 /**
- * Applies higher-sector toughness scaling for `sectorIndex >= 2`:
- *  - Higher HP scaling across total HP and all parts
- *  - Multiple regenerating shield layers (`shieldLayers`, `maxShieldLayers`, `shieldLayerHp`)
- *  - Periodic Rampage Invulnerability (`rampageCooldown`, `rampageTimer`)
+ * Milestone 4.16: Initializes universal boss shields so every boss spawns with
+ * at least 1 active shield layer (`shieldLayers >= 1`, `shieldHp > 0`) in Sector 1,
+ * scaling layer count and shield HP upward in higher sectors.
+ */
+export function computeBossShieldConfig(
+  maxHp: number,
+  sectorIndex = 0,
+  baseLayerHpOverride?: number,
+): {
+  shieldLayers: number;
+  maxShieldLayers: number;
+  shieldLayerHp: number;
+  shieldHp: number;
+  shieldMaxHp: number;
+  shieldRegenDelay: number;
+} {
+  const safeSector = Math.max(0, Math.floor(sectorIndex));
+  // Sector 1 (idx 0): 1 layer; Sector 2-3 (idx 1-2): 2 layers; Sector 4-5 (idx 3-4): 3 layers; 6+: 4 layers
+  const layers = Math.min(4, 1 + Math.floor((safeSector + 1) / 2));
+  const baseHp = baseLayerHpOverride ?? Math.max(120, Math.round(maxHp * 0.14));
+  const layerHp = Math.round(baseHp * (1 + safeSector * 0.1));
+  return {
+    shieldLayers: layers,
+    maxShieldLayers: layers,
+    shieldLayerHp: layerHp,
+    shieldHp: layerHp,
+    shieldMaxHp: layerHp,
+    shieldRegenDelay: 0,
+  };
+}
+
+/**
+ * Applies higher-sector toughness scaling:
+ *  - Ensures universal shields scale up with `sectorIndex` (1 layer in S1, 2 in S2-3, 3 in S4-5, 4 in S6+)
+ *  - For `sectorIndex >= 2`: higher HP scaling across total HP and all parts + periodic Rampage Invulnerability
  */
 export function applyHigherSectorBossScaling(
   boss: BossState,
   sectorIndex: number,
 ): BossState {
-  if (sectorIndex < 2) return boss;
+  const safeSector = Math.max(0, Math.floor(sectorIndex));
+  boss.sectorIndex = safeSector;
 
-  const hpScale = 1 + (sectorIndex - 1) * 0.35;
-  boss.maxHp = Math.round(boss.maxHp * hpScale);
-  boss.hp = boss.maxHp;
-  for (let i = 0; i < boss.parts.length; i++) {
-    const part = boss.parts[i];
-    part.maxHp = Math.round(part.maxHp * hpScale);
-    part.hp = part.maxHp;
+  if (safeSector >= 2) {
+    const hpScale = 1 + (safeSector - 1) * 0.35;
+    boss.maxHp = Math.round(boss.maxHp * hpScale);
+    boss.hp = boss.maxHp;
+    for (let i = 0; i < boss.parts.length; i++) {
+      const part = boss.parts[i];
+      part.maxHp = Math.round(part.maxHp * hpScale);
+      part.hp = part.maxHp;
+    }
+
+    // Periodic Rampage Invulnerability bursts
+    boss.rampageTimer = 0;
+    boss.rampageCooldown = RAMPAGE_COOLDOWN_SEC;
   }
 
-  // Multi-layer regenerating shields (2 layers at sector 2-3, 3 at 4-5, 4 at 6+)
-  const layers = Math.min(4, 1 + Math.floor(sectorIndex / 2));
-  const layerHp = Math.max(120, Math.round(boss.maxHp * 0.14));
-  boss.shieldLayers = layers;
-  boss.maxShieldLayers = layers;
-  boss.shieldLayerHp = layerHp;
-  boss.shieldHp = layerHp;
-  boss.shieldMaxHp = layerHp;
+  // Universal sector-scaled shields (at least 1 active layer even in Sector 1)
+  const shieldCfg = computeBossShieldConfig(
+    boss.maxHp,
+    safeSector,
+    safeSector === 0 ? boss.shieldMaxHp : undefined,
+  );
+  boss.shieldLayers = shieldCfg.shieldLayers;
+  boss.maxShieldLayers = shieldCfg.maxShieldLayers;
+  boss.shieldLayerHp = shieldCfg.shieldLayerHp;
+  boss.shieldHp = shieldCfg.shieldHp;
+  boss.shieldMaxHp = shieldCfg.shieldMaxHp;
   boss.shieldRegenDelay = 0;
-
-  // Periodic Rampage Invulnerability bursts
-  boss.rampageTimer = 0;
-  boss.rampageCooldown = RAMPAGE_COOLDOWN_SEC;
 
   return boss;
 }

@@ -8,6 +8,7 @@ import type {
 import {
   applyBossDamageToPlayer,
   BOSS_FIRE_ANIM_SEC,
+  computeBossShieldConfig,
   nextBossProjectileId,
   SHIELD_REGEN_DELAY_SEC,
   stepBossCommonTimers,
@@ -33,6 +34,7 @@ let recogniserSeq = 0;
 export function createRecogniser(x: number, y: number): BossState {
   recogniserSeq += 1;
   const totalHp = LEG_MAX_HP * 2 + HEAD_MAX_HP;
+  const shields = computeBossShieldConfig(totalHp, 0);
   return {
     id: `boss_recogniser_${recogniserSeq}`,
     kind: 'recogniser',
@@ -89,6 +91,7 @@ export function createRecogniser(x: number, y: number): BossState {
     ],
     bladeAngle: 0,
     bladeRadius: 0,
+    ...shields,
     slamTargetX: x,
     slamTargetY: y,
     slamProgress: 0,

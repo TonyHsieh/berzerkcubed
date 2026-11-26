@@ -254,3 +254,23 @@ Spec: `docs/specs/milestone-4.13-tweaks.md`.
 - **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
   - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed).
   - `pnpm test` (`vitest run`): **PASSED** — **17 test files passed (17), 141 tests passed (141)** (122 prior + 19 new). A backward-compatible `computeOttoAlarmTiming()` preserves the old short-`ottoWarningSec` contract while defaulting to the spec's 4s delay / 45s warning.
+
+---
+
+## Milestone 4.16 — Boss Tempo Ramp, Dalek Otto, Universal Shields, Taller Sprites, ABB Salvo, Gamepad Pause & Gallery Tuner
+
+- **Files modified**:
+  - `src/audio/soundEngine.ts` — exported `LEVEL_BASE_BPM` (`118`), `BOSS_BASE_BPM` (`148`), `BOSS_MAX_BPM` (`210`); added `setBossHpRatio(ratio)`, `getBossTempoBpm()`, and `getTempoMultiplier()` scaling Boss Danger BPM `148 -> 210` (`~1.42x`) as boss HP drops `1.0 -> 0.0`, resetting cleanly on boss death or return to level/silent music.
+  - `src/audio/voiceTaunts.ts` — retuned `VOICE_PRESETS.evil_otto` to screechy Dalek preset (`pitchMul: 1.8`, `rateMul: 1.2`, `ringModHz: 55`) with headless-safe Tone.js FM/BitCrusher metallic ring-modulator accompaniment.
+  - `src/config/difficulty.ts` & `src/engine/types.ts` — added `ottoCountdownSec: 10.0` (`ottoWarningSec: 14.0` after 4.0s post-boss delay), `BossState.bladeExtend`, and `BossState.sectorIndex`.
+  - `src/bosses/bossUtils.ts`, `maximilian.ts`, `recogniser.ts`, `evilOtto.ts`, `abb.ts`, `skullhead.ts`, `bugHive.ts`, `brainbot.ts` — exported `computeBossShieldConfig`, `getMaximilianTargetBladeExtend`, `getAbbSalvoCount`; gave all 7 bosses `shieldLayers >= 1` / `shieldHp > 0` in Sector 1 scaling upward in higher sectors; added Maximilian smooth `bladeExtend` (`0..1`) & melee reach extension during `charge`/`whirlwind`; tuned ABB salvo to `Math.min(8, 2 + sectorNum)` (3 in S1 -> 8) with `ABB_ICBM_SPEED = 390` and `ABB_ICBM_TURN_RATE = 1.25`.
+  - `src/render/spriteStack.ts` & `src/render/models.ts` — exported `CHARACTER_HEIGHT_MULTIPLIER` (`1.42`), `RECOGNISER_HEIGHT_MULTIPLIER` (`1.0`), `getEntitySpacingMultiplier(kind)`; applied `1.42x` vertical height to all non-Recogniser characters; expanded Skullhead to 16 vertical layers exposing more sculpted skull face under the propeller hat; rebuilt Brainbot upper body into a 16-layer smooth round translucent glass dome enclosing a glowing convoluted pink/coral/orange brain + green optic.
+  - `src/engine/input.ts`, `src/game/hud.ts`, `src/main.ts` — exported `PAUSE_MENU_ITEMS`, `createPauseMenuNav`, `gamepadSnapshotToPauseNavInput`; wired full Gamepad Pause Menu navigation (D-Pad/Left Stick Up/Down with wrap & repeat debounce, A confirm, Start/B resume or exit Model Gallery); hid Boss HUD shield bar once broken.
+  - `src/game/gallery.ts` — exported `GALLERY_MIN_SPACING`, `GALLERY_MAX_SPACING`, `GALLERY_SPACING_STEP`, `createGalleryControlState`, `clampGallerySpacing`, `stepGalleryControls`, `applyGalleryKeyPress`, `formatGalleryTelemetry`; wired WASD/Arrow live rotation + 0.1px stack spacing controls, Space auto-spin toggle, and live numeric telemetry badge.
+  - `src/game/renderer.ts` & `src/game/gameState.ts` — wired live boss HP ratio -> `sound.setBossHpRatio`, Maximilian extending sawblade arms, universal boss shield aura/barrier, taller non-Recogniser vertical spacing, glossy Brainbot glass dome arcs, Dalek Otto alarm taunts (`"BEWARE!"`, `"I SENSE YOU!"`, `"EXTERMINATE THE HUMANOID!"`), and ABB sector scaling.
+  - Updated superseded assertions in `src/audio/audio.test.ts`, `src/bosses/bosses.test.ts`, `src/game/gameState.test.ts`, `src/game/milestone414.test.ts`, `src/game/milestone415.test.ts`, and `src/game/renderer.test.ts`.
+- **Files created**:
+  - `src/game/milestone416.test.ts` — 12 headless Vitest tests covering all 8 Milestone 4.16 acceptance criteria.
+- **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed, built in 1.54s).
+  - `pnpm test` (`vitest run`): **PASSED** — **18 test files passed (18), 153 tests passed (153)** (141 prior + 12 new Milestone 4.16 tests), exit code 0.

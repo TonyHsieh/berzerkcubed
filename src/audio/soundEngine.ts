@@ -46,6 +46,9 @@ const BOSS_PERC_PATTERN = [
 
 const LEVEL_GAIN_TARGET = 0.28;
 const BOSS_GAIN_TARGET = 0.34;
+export const LEVEL_BASE_BPM = 118;
+export const BOSS_BASE_BPM = 148;
+export const BOSS_MAX_BPM = 210;
 
 interface MusicRig {
   masterGain: { gain: { rampTo(v: number, t: number): unknown; value: number } };
@@ -65,6 +68,7 @@ export class SoundEngine {
   private _musicMode: MusicMode = 'silent';
   private _paused = false;
   private _lastFadeSec = 0;
+  private _bossHpRatio = 1;
   muted = false;
   bassEnabled = false;
 
@@ -82,6 +86,29 @@ export class SoundEngine {
 
   getLastFadeSec(): number {
     return this._lastFadeSec;
+  }
+
+  /**
+   * Milestone 4.16: Scales Boss Danger music tempo proportionally as active boss HP
+   * drops from 1.0 -> 0.0 (148 BPM -> ~210 BPM / ~1.42x). Clamped to [0, 1].
+   */
+  setBossHpRatio(ratio: number): void {
+    const clamped = Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 1;
+    this._bossHpRatio = clamped;
+    if (this._musicMode === 'boss' && this.Tone && this.musicRig) {
+      this.Tone.getTransport().bpm.rampTo(this.getBossTempoBpm(), 0.2);
+    }
+  }
+
+  /** Returns the current Boss Danger BPM (148..210 while in boss mode; 148 base otherwise). */
+  getBossTempoBpm(): number {
+    if (this._musicMode !== 'boss') return BOSS_BASE_BPM;
+    return BOSS_BASE_BPM + (1 - this._bossHpRatio) * (BOSS_MAX_BPM - BOSS_BASE_BPM);
+  }
+
+  /** Returns the current boss tempo multiplier relative to base boss BPM (1.0..~1.42). */
+  getTempoMultiplier(): number {
+    return this.getBossTempoBpm() / BOSS_BASE_BPM;
   }
 
   /** Must be called from a user gesture (browser autoplay policy). */
@@ -198,7 +225,7 @@ export class SoundEngine {
     if (mode !== 'silent') {
       this.ensureTransportStarted();
     }
-    const targetBpm = mode === 'boss' ? 148 : 118;
+    const targetBpm = mode === 'boss' ? this.getBossTempoBpm() : LEVEL_BASE_BPM;
     this.Tone.getTransport().bpm.rampTo(targetBpm, safeFade);
 
     const levelTarget = mode === 'level' ? LEVEL_GAIN_TARGET : 0;
@@ -221,6 +248,10 @@ export class SoundEngine {
   setMusicMode(mode: MusicMode, fadeSec?: number): void {
     const defaultFade = mode === 'level' ? 1.2 : mode === 'boss' ? 1.0 : 0.6;
     const resolvedFade = fadeSec ?? defaultFade;
+    if (mode !== 'boss' || this._musicMode !== 'boss') {
+      // Reset boss tempo ramp when leaving boss music or starting a fresh boss encounter
+      this._bossHpRatio = 1;
+    }
     this._musicMode = mode;
     this._lastFadeSec = resolvedFade;
     this.bassEnabled = mode !== 'silent';

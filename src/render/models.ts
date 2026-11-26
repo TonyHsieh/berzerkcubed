@@ -2,7 +2,11 @@
 // Milestone 4.11: Light-to-medium metallic grey structural tones (#64748b, #94a3b8, #cbd5e1)
 // paired with high-contrast red/yellow/orange/gold/cyan accents (zero black enemy silhouettes).
 import type { OrbitalType, OttoVariant, WeaponType } from '../engine/types';
-import { makeSlice, type SpriteStackCache } from './spriteStack';
+import {
+  getEntitySpacingMultiplier,
+  makeSlice,
+  type SpriteStackCache,
+} from './spriteStack';
 
 export const SLICE_SIZE = 24;
 type Ctx = CanvasRenderingContext2D;
@@ -583,68 +587,74 @@ export interface SkullheadModel {
 }
 
 export function buildSkullhead(): SkullheadModel {
-  const body = layers(14, (ctx, cx, cy, z) => {
-    const ivory = '#f1f5f9';
+  // Milestone 4.16: 16 vertical layers exposing a tall sculpted ivory Skull Face across
+  // the front facade (-Y): clear jaw/teeth grille, nasal cavity, deep dark eye sockets
+  // with blazing orange/red laser eyes, and tall ivory cranium under the tiny propeller hat.
+  const body = layers(16, (ctx, cx, cy, z) => {
+    const ivory = '#f8fafc';
     const boneLight = '#e2e8f0';
     const boneShade = '#94a3b8';
     const steelDark = '#1e293b';
-    const socket = '#090d16';
+    const socket = '#070a12';
     const eyeGlow = '#ff3b00';
     const eyeCore = '#fef08a';
     const gold = '#facc15';
     const teal = '#14b8a6';
 
-    if (z <= 2) {
-      // Compact underslung mechanical tendrils & thruster base
-      rect(ctx, '#475569', cx - 6, cy - 4, 2, 3);
-      rect(ctx, '#475569', cx + 4, cy - 4, 2, 3);
+    if (z <= 1) {
+      // Compact underslung mechanical thruster tendrils
+      rect(ctx, '#475569', cx - 6, cy - 3, 2, 3);
+      rect(ctx, '#475569', cx + 4, cy - 3, 2, 3);
       rect(ctx, '#475569', cx - 5, cy + 3, 2, 3);
       rect(ctx, '#475569', cx + 3, cy + 3, 2, 3);
       rect(ctx, steelDark, cx - 4, cy - 3, 8, 6);
       rect(ctx, teal, cx - 2, cy - 1, 4, 2);
     } else if (z <= 4) {
-      // Metallic jaw & high-contrast teeth grille on the front (-Y)
+      // Sculpted jawbone & bold high-contrast teeth grille across front (-Y)
       rect(ctx, boneShade, cx - 6, cy - 5, 12, 11);
-      rect(ctx, steelDark, cx - 5, cy - 7, 10, 3);
-      // Alternating bright teeth bars along the front jaw (-Y)
-      rect(ctx, ivory, cx - 4, cy - 7, 2, 2);
-      rect(ctx, ivory, cx - 1, cy - 7, 2, 2);
-      rect(ctx, ivory, cx + 2, cy - 7, 2, 2);
+      rect(ctx, boneLight, cx - 6, cy - 7, 12, 3);
+      rect(ctx, socket, cx - 5, cy - 8, 10, 3);
+      // Four crisp ivory teeth bars separated by dark vertical gaps
+      rect(ctx, ivory, cx - 4, cy - 8, 2, 2);
+      rect(ctx, ivory, cx - 1, cy - 8, 2, 2);
+      rect(ctx, ivory, cx + 2, cy - 8, 2, 2);
+      if (z === 3) {
+        rect(ctx, boneLight, cx - 5, cy - 8, 10, 1);
+      }
       rect(ctx, gold, cx - 6, cy + 4, 12, 2);
     } else if (z <= 6) {
-      // Cheekbones + dark recessed nasal cavity on front (-Y)
+      // Broad cheekbones + prominent dark recessed triangular nasal cavity (-Y)
       rect(ctx, boneLight, cx - 8, cy - 6, 16, 13);
-      rect(ctx, ivory, cx - 7, cy - 7, 14, 3);
-      // Nasal cavity (dark recessed notch at front center)
-      rect(ctx, socket, cx - 2, cy - 8, 4, 3);
-      // Subtle cybernetic side plates
+      rect(ctx, ivory, cx - 8, cy - 8, 16, 4);
+      const nw = z === 5 ? 4 : 2;
+      rect(ctx, socket, cx - nw / 2, cy - 9, nw, 3);
       rect(ctx, boneShade, cx - 8, cy + 4, 16, 3);
       rect(ctx, teal, cx - 5, cy + 6, 10, 1);
-    } else if (z <= 9) {
-      // Main skull face: sculpted cranium + deep dark eye sockets + glowing orange/red laser eyes
+    } else if (z <= 10) {
+      // Tall sculpted ivory skull face with deep dark eye sockets & blazing laser eyes
       rect(ctx, ivory, cx - 8, cy - 7, 16, 14);
       rect(ctx, boneLight, cx - 7, cy - 8, 14, 2);
       // Deep dark recessed eye sockets on the front (-Y)
       rect(ctx, socket, cx - 6, cy - 9, 5, 4);
       rect(ctx, socket, cx + 1, cy - 9, 5, 4);
-      if (z === 7 || z === 8) {
-        // Bright glowing orange/red laser-shooting eyes with white-hot core
+      if (z >= 8 && z <= 10) {
+        // Blazing orange/red laser-shooting eyes with white-hot core
         rect(ctx, eyeGlow, cx - 5, cy - 9, 3, 3);
         rect(ctx, eyeGlow, cx + 2, cy - 9, 3, 3);
         rect(ctx, eyeCore, cx - 4, cy - 9, 1, 2);
         rect(ctx, eyeCore, cx + 3, cy - 9, 1, 2);
       }
-      // Subtle temple accents on back/sides
       rect(ctx, boneShade, cx - 8, cy + 5, 16, 2);
     } else {
-      // Rounded sculpted ivory/light-grey forehead brow ridge & cranium dome tapering to top
-      const r = z === 10 ? 7 : z === 11 ? 6 : z === 12 ? 5 : 3;
-      rect(ctx, z % 2 === 0 ? ivory : boneLight, cx - r, cy - r, r * 2, r * 2);
-      if (z === 10) {
+      // Tall sculpted ivory brow ridge & rounded cranium dome tapering to top (z=11..15)
+      const r = z === 11 ? 8 : z === 12 ? 7 : z === 13 ? 6 : z === 14 ? 5 : 3;
+      rect(ctx, z % 2 === 1 ? ivory : boneLight, cx - r, cy - r, r * 2, r * 2);
+      if (z === 11) {
         // Pronounced sculpted ivory brow ridge overhanging the recessed eye sockets
-        rect(ctx, '#ffffff', cx - 6, cy - r - 1, 12, 2);
+        rect(ctx, '#ffffff', cx - 7, cy - r - 1, 14, 2);
       }
-      if (z === 11 || z === 12) {
+      if (z === 12 || z === 13) {
+        rect(ctx, '#ffffff', cx - r + 2, cy - r, (r - 2) * 2, 2);
         rect(ctx, gold, cx - 1, cy + r - 2, 2, 2);
       }
     }
@@ -715,38 +725,104 @@ export function buildBugHive(): BugHiveModel {
   return { hive, bugBot };
 }
 
-/** Rolling Brainbot: translucent glass-domed biomechanical brain-in-a-jar mech, glowing green eye, warm orange neural core, rolling limbs. */
+/**
+ * Rolling Brainbot (Milestone 4.16): smooth, round translucent glass dome
+ * (glossy cyan/white rim + specular arcs) enclosing a clearly visible, glowing
+ * convoluted brain (pink/coral/orange neural folds + glowing green central optic).
+ */
 export function buildBrainbot(): Slice[] {
-  return layers(14, (ctx, cx, cy, z) => {
+  return layers(16, (ctx, cx, cy, z) => {
     const metal = '#94a3b8';
     const light = '#cbd5e1';
-    const glass = '#67e8f9';
+    const pinkBrain = '#f472b6';
+    const coralBrain = '#fb7185';
     const orangeBrain = '#fb923c';
     const greenEye = '#4ade80';
+
     if (z <= 3) {
-      // Stubby rolling/walker chassis + lower speaker/jaw grille on front
-      rect(ctx, '#64748b', cx - 8, cy - 6, 16, 12);
+      // Compact rolling wheel/walker base + lower speaker/jaw grille on front (-Y)
+      ctx.fillStyle = '#475569';
+      ctx.beginPath();
+      ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+      ctx.fill();
       rect(ctx, metal, cx - 10, cy - 3, 4, 6);
       rect(ctx, metal, cx + 6, cy - 3, 4, 6);
-      rect(ctx, '#1e293b', cx - 4, cy - 7, 8, 2);
-      rect(ctx, orangeBrain, cx - 3, cy - 7, 6, 1);
-    } else if (z <= 7) {
-      // Collar ring + prominent glowing green central eye spanning z=5..7
-      rect(ctx, light, cx - 8, cy - 7, 16, 14);
-      rect(ctx, '#0f172a', cx - 5, cy - 8, 10, 3);
-      rect(ctx, greenEye, cx - 3, cy - 8, 6, 2);
-      rect(ctx, '#ffffff', cx - 1, cy - 8, 2, 1);
+      rect(ctx, '#1e293b', cx - 4, cy - 8, 8, 2);
+      rect(ctx, orangeBrain, cx - 3, cy - 8, 6, 1);
+    } else if (z <= 5) {
+      // Round metallic collar ring + glowing green central optic housing on front (-Y)
+      ctx.fillStyle = z === 4 ? metal : light;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#67e8f9';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      rect(ctx, '#0f172a', cx - 4, cy - 9, 8, 3);
+      rect(ctx, greenEye, cx - 3, cy - 9, 6, 2);
+      rect(ctx, '#ffffff', cx - 1, cy - 9, 2, 1);
     } else {
-      // Translucent glass dome + warm orange biomechanical brain core inside
-      const r = z >= 12 ? 5 : 7;
-      ctx.globalAlpha = 0.45;
-      rect(ctx, glass, cx - r, cy - r, r * 2, r * 2);
-      ctx.globalAlpha = 1;
-      const br = Math.max(3, r - 2);
-      rect(ctx, z % 2 ? orangeBrain : '#f97316', cx - br, cy - br, br * 2, br * 2);
-      if (z === 9 || z === 10) {
-        rect(ctx, greenEye, cx - 2, cy - 2, 4, 4);
+      // Smooth round spherical translucent glass dome (z=6..15)
+      const t = (z - 6) / 9; // 0 at base of dome -> 1 at crown
+      const domeR = Math.max(3, Math.sin(Math.acos(Math.min(0.92, t * 0.92))) * 9.6);
+
+      // 1. Inner glowing convoluted brain (visible inside z=6..13)
+      if (z <= 13) {
+        const brainR = Math.max(2.2, domeR - 2.4);
+        // Left & right cerebral hemispheres
+        ctx.fillStyle = z % 2 === 0 ? pinkBrain : coralBrain;
+        ctx.beginPath();
+        ctx.arc(cx - brainR * 0.32, cy, brainR * 0.68, 0, Math.PI * 2);
+        ctx.arc(cx + brainR * 0.32, cy, brainR * 0.68, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Convoluted orange/pink neural gyri folds
+        ctx.fillStyle = z % 2 === 0 ? orangeBrain : '#f9a8d4';
+        ctx.fillRect(cx - brainR * 0.65, cy - brainR * 0.35, brainR * 0.5, 2);
+        ctx.fillRect(cx + brainR * 0.15, cy - brainR * 0.25, brainR * 0.5, 2);
+        ctx.fillRect(cx - brainR * 0.45, cy + brainR * 0.18, brainR * 0.9, 1.5);
+
+        // Central longitudinal fissure
+        ctx.fillStyle = '#9d174d';
+        ctx.fillRect(cx - 0.5, cy - brainR * 0.65, 1, brainR * 1.3);
+
+        // Glowing green central optic embedded at front of brain (z=7..10)
+        if (z >= 7 && z <= 10) {
+          ctx.fillStyle = greenEye;
+          ctx.beginPath();
+          ctx.arc(cx, cy - brainR * 0.55, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(cx - 0.8, cy - brainR * 0.55 - 0.8, 1.6, 1.6);
+        }
       }
+
+      // 2. Translucent spherical cyan glass dome shell
+      ctx.save();
+      ctx.globalAlpha = z >= 14 ? 0.42 : 0.26;
+      ctx.fillStyle = '#67e8f9';
+      ctx.beginPath();
+      ctx.arc(cx, cy, domeR, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Glossy cyan/white circular glass rim
+      ctx.globalAlpha = 0.85;
+      ctx.strokeStyle = z >= 13 ? '#e0f2fe' : '#67e8f9';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(cx, cy, domeR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Specular highlight arc on upper-left quadrant
+      if (domeR >= 4) {
+        ctx.globalAlpha = 0.92;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, domeR - 1.2, -Math.PI * 0.82, -Math.PI * 0.38);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
   });
 }
@@ -838,13 +914,15 @@ export function getBakeTasks(
   spacingPx: number,
 ): BakeTask[] {
   const tasks: BakeTask[] = [];
-  const bakeFrames = (kind: string, frames: Slice[][]) =>
+  const bakeFrames = (kind: string, frames: Slice[][]) => {
+    const entitySpacing = spacingPx * getEntitySpacingMultiplier(kind);
     frames.forEach((frame, i) => {
       tasks.push({
         label: `BAKING 24-ANGLE ${kind.toUpperCase()} CACHE ${i + 1}/${frames.length}`,
-        run: () => cache.bake(enemyCacheKey(kind, i), frame, scale, spacingPx),
+        run: () => cache.bake(enemyCacheKey(kind, i), frame, scale, entitySpacing),
       });
     });
+  };
 
   bakeFrames('enforcer_melee', models.enforcer);
   bakeFrames('v_bot_melee', models.vBotMelee);

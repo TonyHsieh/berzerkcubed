@@ -198,6 +198,9 @@ describe('Milestone 3 Integration — Full Headless Simulation Loop', () => {
     const head = boss.parts.find((p) => p.id === 'head_core')!;
     const leftLeg = boss.parts.find((p) => p.id === 'left_leg')!;
     const rightLeg = boss.parts.find((p) => p.id === 'right_leg')!;
+    // Clear universal Sector 1 shield to test part-level leg->head unlock directly
+    boss.shieldLayers = 0;
+    boss.shieldHp = 0;
     expect(head.vulnerable).toBe(false);
 
     const idle = createDefaultInputState();
@@ -671,6 +674,8 @@ describe('Milestone 4.12 — Hero Death Explosion, Full Loadout Reset & Telefrag
       color: '#ff2a55',
     });
     const boss = spawnBoss(state, 'abb');
+    boss.shieldLayers = 0;
+    boss.shieldHp = 0;
     boss.x = deathX + 30;
     boss.y = deathY;
     const bossHpBefore = boss.hp;
@@ -740,6 +745,9 @@ describe('Milestone 4.13 — Boss Hit-Flash & Classic Door-Walk Push-Slide Trans
     state.waveIndex = state.wavesPerSector;
     state.player.invulnTimer = 10;
     const skull = spawnBoss(state, 'skullhead');
+    // Clear universal Sector 1 shield so this step tests core-HP hitFlash directly
+    skull.shieldLayers = 0;
+    skull.shieldHp = 0;
 
     state.playerProjectiles.push({
       id: 'm413_bolt',
@@ -775,6 +783,8 @@ describe('Milestone 4.13 — Boss Hit-Flash & Classic Door-Walk Push-Slide Trans
     beamState.waveIndex = beamState.wavesPerSector;
     beamState.player.invulnTimer = 10;
     const brain = spawnBoss(beamState, 'brainbot');
+    brain.shieldLayers = 0;
+    brain.shieldHp = 0;
     beamState.playerProjectiles.push({
       id: 'm413_beam',
       owner: 'player',
@@ -832,6 +842,8 @@ describe('Milestone 4.13 — Boss Hit-Flash & Classic Door-Walk Push-Slide Trans
     orbState.waveIndex = orbState.wavesPerSector;
     orbState.player.invulnTimer = 10;
     const abb = spawnBoss(orbState, 'abb');
+    abb.shieldLayers = 0;
+    abb.shieldHp = 0;
     const saber = addOrbital(orbState.player, 'lightsaber');
     saber.orbitAngle = 0;
     orbState.player.x = abb.x - saber.orbitRadius;
@@ -851,6 +863,8 @@ describe('Milestone 4.13 — Boss Hit-Flash & Classic Door-Walk Push-Slide Trans
     state.waveIndex = state.wavesPerSector;
     state.player.invulnTimer = 10;
     const boss = spawnBoss(state, 'abb');
+    boss.shieldLayers = 0;
+    boss.shieldHp = 0;
     state.playerProjectiles.push({
       id: 'm413_boss_kill',
       owner: 'player',

@@ -9,9 +9,120 @@ export function isGalleryEnabled(search: string): boolean {
   return new URLSearchParams(search).get('gallery') === '1';
 }
 
+// ---------- Milestone 4.16: Interactive Gallery Controls (Headless-Testable) ----------
+
+export const GALLERY_MIN_SPACING = 1.0;
+export const GALLERY_MAX_SPACING = 8.0;
+export const GALLERY_SPACING_STEP = 0.1;
+export const GALLERY_DEFAULT_SPACING = 3.4;
+export const GALLERY_MANUAL_ROTATE_DEG_PER_SEC = 110;
+export const GALLERY_AUTO_SPIN_DEG_PER_SEC = 27;
+
+export interface GalleryControlState {
+  angleDeg: number;
+  spacingPx: number;
+  pitchY: number;
+  autoSpin: boolean;
+}
+
+export function clampGallerySpacing(spacingPx: number): number {
+  const safe = Number.isFinite(spacingPx) ? spacingPx : GALLERY_DEFAULT_SPACING;
+  const clamped = Math.max(GALLERY_MIN_SPACING, Math.min(GALLERY_MAX_SPACING, safe));
+  return Math.round(clamped * 10) / 10;
+}
+
+export function createGalleryControlState(
+  overrides: Partial<GalleryControlState> = {},
+): GalleryControlState {
+  const rawAngle = overrides.angleDeg ?? 0;
+  return {
+    angleDeg: ((rawAngle % 360) + 360) % 360,
+    spacingPx: clampGallerySpacing(overrides.spacingPx ?? GALLERY_DEFAULT_SPACING),
+    pitchY: overrides.pitchY ?? DEFAULT_SLICE_PITCH_Y,
+    autoSpin: overrides.autoSpin ?? true,
+  };
+}
+
+/** Pure continuous update for held keys (A/D/Left/Right rotate, W/S/Up/Down adjust spacing). */
+export function stepGalleryControls(
+  state: GalleryControlState,
+  heldKeys: ReadonlySet<string>,
+  dt: number,
+): GalleryControlState {
+  const safeDt = Math.max(0, dt);
+  const rotLeft = heldKeys.has('KeyA') || heldKeys.has('ArrowLeft');
+  const rotRight = heldKeys.has('KeyD') || heldKeys.has('ArrowRight');
+  const spaceUp = heldKeys.has('KeyW') || heldKeys.has('ArrowUp');
+  const spaceDown = heldKeys.has('KeyS') || heldKeys.has('ArrowDown');
+
+  let angleDeg = state.angleDeg;
+  let autoSpin = state.autoSpin;
+  let spacingPx = state.spacingPx;
+
+  if (rotLeft !== rotRight) {
+    autoSpin = false;
+    const dir = rotRight ? 1 : -1;
+    angleDeg = (((angleDeg + dir * GALLERY_MANUAL_ROTATE_DEG_PER_SEC * safeDt) % 360) + 360) % 360;
+  } else if (autoSpin) {
+    angleDeg = (((angleDeg + GALLERY_AUTO_SPIN_DEG_PER_SEC * safeDt) % 360) + 360) % 360;
+  }
+
+  if (spaceUp !== spaceDown) {
+    const dir = spaceUp ? 1 : -1;
+    // Scale continuous adjustment in crisp 0.1px increments (~1.5px/sec while held)
+    const steps = Math.max(1, Math.round(safeDt * 15));
+    spacingPx = clampGallerySpacing(spacingPx + dir * GALLERY_SPACING_STEP * steps);
+  }
+
+  return { angleDeg, spacingPx, pitchY: state.pitchY, autoSpin };
+}
+
+/** Pure discrete key press handler for single-tap adjustments and Space auto-spin toggle. */
+export function applyGalleryKeyPress(
+  state: GalleryControlState,
+  code: string,
+): GalleryControlState {
+  if (code === 'KeyW' || code === 'ArrowUp') {
+    return {
+      ...state,
+      spacingPx: clampGallerySpacing(state.spacingPx + GALLERY_SPACING_STEP),
+    };
+  }
+  if (code === 'KeyS' || code === 'ArrowDown') {
+    return {
+      ...state,
+      spacingPx: clampGallerySpacing(state.spacingPx - GALLERY_SPACING_STEP),
+    };
+  }
+  if (code === 'KeyA' || code === 'ArrowLeft') {
+    return {
+      ...state,
+      autoSpin: false,
+      angleDeg: (((state.angleDeg - 5) % 360) + 360) % 360,
+    };
+  }
+  if (code === 'KeyD' || code === 'ArrowRight') {
+    return {
+      ...state,
+      autoSpin: false,
+      angleDeg: (((state.angleDeg + 5) % 360) + 360) % 360,
+    };
+  }
+  if (code === 'Space') {
+    return { ...state, autoSpin: !state.autoSpin };
+  }
+  return state;
+}
+
+export function formatGalleryTelemetry(state: GalleryControlState): string {
+  const angle = Math.round(((state.angleDeg % 360) + 360) % 360) % 360;
+  return `STACK SPACING: ${state.spacingPx.toFixed(1)}px  |  PITCH Y: ${state.pitchY.toFixed(2)}  |  ANGLE: ${angle}°`;
+}
+
 export interface GalleryHandle {
   destroy(): void;
   toggle(): void;
+  close?(): void;
 }
 
 interface GalleryEntry {
@@ -108,11 +219,27 @@ export function createModelGallery(
 
   const closeLabel = options.closeLabel ?? 'CLOSE [G]';
   const header = document.createElement('div');
-  header.style.cssText = 'width:100%;max-width:1180px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;';
+  header.style.cssText = 'width:100%;max-width:1180px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;';
   header.innerHTML =
     '<div style="font-size:20px;color:#22d3ee;letter-spacing:4px;text-shadow:0 0 12px #22d3ee;">MODEL GALLERY // SPRITE INSPECTOR · 5× TURNTABLE</div>' +
-    `<button id="gallery-close" style="background:#0f172a;color:#f43f5e;border:2px solid #f43f5e;padding:6px 14px;font:inherit;cursor:pointer;letter-spacing:2px;">${closeLabel}</button>`;
+    '<div style="display:flex;gap:8px;align-items:center;">' +
+    '<button id="gallery-spin-toggle" style="background:#0f172a;color:#4ade80;border:1px solid #4ade80;padding:6px 12px;font:inherit;font-size:11px;cursor:pointer;letter-spacing:1px;">AUTO-SPIN: ON [SPACE]</button>' +
+    `<button id="gallery-close" style="background:#0f172a;color:#f43f5e;border:2px solid #f43f5e;padding:6px 14px;font:inherit;cursor:pointer;letter-spacing:2px;">${closeLabel}</button>` +
+    '</div>';
   overlay.appendChild(header);
+
+  // Milestone 4.16: Prominent live numeric telemetry badge + interactive controls legend
+  const telemetryBar = document.createElement('div');
+  telemetryBar.style.cssText =
+    'width:100%;max-width:1180px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;' +
+    'background:rgba(11,18,32,0.92);border:1px solid #22d3ee;padding:10px 16px;margin-bottom:16px;box-shadow:0 0 14px rgba(34,211,238,0.22);';
+  telemetryBar.innerHTML =
+    '<div id="gallery-telemetry" style="font-size:14px;font-weight:bold;color:#facc15;letter-spacing:1.5px;text-shadow:0 0 8px rgba(250,204,21,0.45);"></div>' +
+    '<div style="font-size:11px;color:#94a3b8;letter-spacing:0.8px;">A/D or ←/→ Rotate · W/S or ↑/↓ Stack Spacing (0.1px) · SPACE Auto-Spin</div>';
+  overlay.appendChild(telemetryBar);
+
+  const telemetryEl = telemetryBar.querySelector('#gallery-telemetry') as HTMLDivElement;
+  const spinToggleBtn = header.querySelector('#gallery-spin-toggle') as HTMLButtonElement;
 
   const grid = document.createElement('div');
   grid.style.cssText =
@@ -143,10 +270,25 @@ export function createModelGallery(
 
   document.body.appendChild(overlay);
 
-  let angle = 0;
+  let controlState = createGalleryControlState();
+  const heldKeys = new Set<string>();
+  let lastFrameMs = typeof performance !== 'undefined' ? performance.now() : 0;
   let raf = 0;
-  const draw = () => {
-    angle = (angle + 0.45) % 360;
+
+  const syncTelemetry = () => {
+    telemetryEl.textContent = formatGalleryTelemetry(controlState);
+    spinToggleBtn.textContent = `AUTO-SPIN: ${controlState.autoSpin ? 'ON' : 'OFF'} [SPACE]`;
+    spinToggleBtn.style.color = controlState.autoSpin ? '#4ade80' : '#f59e0b';
+    spinToggleBtn.style.borderColor = controlState.autoSpin ? '#4ade80' : '#f59e0b';
+  };
+  syncTelemetry();
+
+  const draw = (nowMs: number) => {
+    const dt = lastFrameMs > 0 ? Math.min(0.1, Math.max(0, (nowMs - lastFrameMs) / 1000)) : 1 / 60;
+    lastFrameMs = nowMs;
+    controlState = stepGalleryControls(controlState, heldKeys, dt);
+    syncTelemetry();
+
     for (const item of canvases) {
       item.ctx.clearRect(0, 0, item.w, item.h);
       item.ctx.fillStyle = '#050a12';
@@ -156,14 +298,14 @@ export function createModelGallery(
         item.slices,
         item.w / 2,
         item.h * 0.78,
-        angle,
+        controlState.angleDeg,
         0,
         4.5,
         0,
-        3.0,
+        controlState.spacingPx,
         0,
         0,
-        DEFAULT_SLICE_PITCH_Y,
+        controlState.pitchY,
       );
     }
     raf = requestAnimationFrame(draw);
@@ -172,6 +314,8 @@ export function createModelGallery(
 
   let open = true;
   const close = () => {
+    if (!open) return;
+    heldKeys.clear();
     overlay.style.display = 'none';
     open = false;
     cancelAnimationFrame(raf);
@@ -180,11 +324,24 @@ export function createModelGallery(
   const reopen = () => {
     overlay.style.display = 'flex';
     open = true;
+    lastFrameMs = typeof performance !== 'undefined' ? performance.now() : 0;
     raf = requestAnimationFrame(draw);
   };
   const onCloseClick = () => close();
+  const onSpinClick = () => {
+    controlState = applyGalleryKeyPress(controlState, 'Space');
+    syncTelemetry();
+  };
   overlay.querySelector('#gallery-close')?.addEventListener('click', onCloseClick);
-  const onKey = (ev: KeyboardEvent) => {
+  spinToggleBtn.addEventListener('click', onSpinClick);
+
+  const GALLERY_CONTROL_CODES = new Set([
+    'KeyA', 'KeyD', 'KeyW', 'KeyS',
+    'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+    'Space',
+  ]);
+
+  const onKeyDown = (ev: KeyboardEvent) => {
     if (ev.key === 'g' || ev.key === 'G' || ev.key === 'Escape') {
       if (open) {
         ev.preventDefault();
@@ -193,19 +350,42 @@ export function createModelGallery(
       } else if (!options.onClose) {
         reopen();
       }
+      return;
+    }
+    if (!open) return;
+    if (GALLERY_CONTROL_CODES.has(ev.code)) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      if (!heldKeys.has(ev.code)) {
+        controlState = applyGalleryKeyPress(controlState, ev.code);
+        syncTelemetry();
+      }
+      if (ev.code !== 'Space') {
+        heldKeys.add(ev.code);
+      }
     }
   };
-  window.addEventListener('keydown', onKey);
+  const onKeyUp = (ev: KeyboardEvent) => {
+    heldKeys.delete(ev.code);
+  };
+  window.addEventListener('keydown', onKeyDown, true);
+  window.addEventListener('keyup', onKeyUp, true);
 
   return {
     toggle() {
       if (open) close();
       else reopen();
     },
+    close() {
+      close();
+    },
     destroy() {
+      heldKeys.clear();
       cancelAnimationFrame(raf);
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
       overlay.querySelector('#gallery-close')?.removeEventListener('click', onCloseClick);
+      spinToggleBtn.removeEventListener('click', onSpinClick);
       overlay.remove();
     },
   };

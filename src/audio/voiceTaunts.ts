@@ -11,13 +11,24 @@ export interface VoicePreset {
   detuneCents: number;
   distortion: number; // 0..1, fallback synth only
   baseHz: number; // fallback blip base frequency
+  /** Milestone 4.16: optional ring-modulator / metallic bitcrush frequency (Hz) for Dalek-style voices. */
+  ringModHz?: number;
 }
 
 export const VOICE_PRESETS: Record<Speaker, VoicePreset> = {
   enforcer: { pitchMul: 1.0, rateMul: 1.15, wave: 'square', detuneCents: 0, distortion: 0.1, baseHz: 220 },
   maximilian: { pitchMul: 0.55, rateMul: 0.8, wave: 'sawtooth', detuneCents: -30, distortion: 0.5, baseHz: 90 },
   recogniser: { pitchMul: 0.8, rateMul: 0.95, wave: 'triangle', detuneCents: 12, distortion: 0.25, baseHz: 140 },
-  evil_otto: { pitchMul: 0.35, rateMul: 0.7, wave: 'sawtooth', detuneCents: -80, distortion: 0.85, baseHz: 55 },
+  // Milestone 4.16: Screechy clipped metallic Dalek-style Evil Otto voice (pitch 1.7-1.9, rate 1.15-1.25)
+  evil_otto: {
+    pitchMul: 1.8,
+    rateMul: 1.2,
+    wave: 'sawtooth',
+    detuneCents: 45,
+    distortion: 0.9,
+    baseHz: 340,
+    ringModHz: 55,
+  },
 };
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -71,9 +82,50 @@ export class VoiceTauntEngine {
       u.volume = 0.9;
       if (p.speaker === 'evil_otto' || p.speaker === 'maximilian') synth.cancel(); // villains interrupt chatter
       synth.speak(u);
+      // Milestone 4.16: Layer metallic Dalek ring-mod/bitcrush accompaniment when Tone is initialized
+      if (p.speaker === 'evil_otto' && p.preset.ringModHz) {
+        this.playDalekRingModBed(text, p.rate, p.preset);
+      }
       return;
     }
     this.speakFallback(text, p.pitch, p.rate, p.preset);
+  }
+
+  /** Headless-safe Tone.js metallic ring-modulator / bitcrush accompaniment for Dalek-style Otto. */
+  private playDalekRingModBed(text: string, rate: number, preset: VoicePreset): void {
+    const Tone = this.Tone;
+    if (!Tone) return;
+    try {
+      const now = Math.max(Tone.now(), this.lastSpeakAt) + 0.01;
+      const fm = new Tone.FMSynth({
+        harmonicity: 5.5,
+        modulationIndex: 28,
+        oscillator: { type: 'sawtooth' },
+        modulation: { type: 'square' },
+        envelope: { attack: 0.004, decay: 0.06, sustain: 0.25, release: 0.03 },
+      });
+      const crusher = new Tone.BitCrusher(4);
+      const dist = new Tone.Distortion(preset.distortion);
+      const gain = new Tone.Gain(0.18);
+      fm.chain(crusher, dist, gain, Tone.getDestination());
+      const step = 0.075 / Math.max(0.5, rate);
+      const syllables = Math.min(10, Math.max(3, text.replace(/[^a-zA-Z]/g, '').length));
+      let t = now;
+      for (let i = 0; i < syllables; i++) {
+        const hz = (preset.baseHz + (i % 3) * (preset.ringModHz ?? 55)) * 1.15;
+        fm.triggerAttackRelease(hz, step * 0.65, t);
+        t += step;
+      }
+      this.lastSpeakAt = Math.max(this.lastSpeakAt, t);
+      setTimeout(() => {
+        fm.dispose();
+        crusher.dispose();
+        dist.dispose();
+        gain.dispose();
+      }, Math.ceil((t - Tone.now() + 0.4) * 1000));
+    } catch {
+      // Headless / unavailable audio context: safely ignore
+    }
   }
 
   private speakFallback(text: string, pitch: number, rate: number, preset: VoicePreset): void {
