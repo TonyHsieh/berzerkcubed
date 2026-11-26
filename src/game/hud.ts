@@ -118,8 +118,8 @@ export function createHud(
     <div style="font-size:12px;color:#facc15;margin-top:2px;">SCORE: <span id="hud-score">0</span></div>
     <div style="font-size:11px;color:#cbd5e1;margin-top:2px;">HOSTILES: <span id="hud-enemies">0</span></div>
     <div id="hud-otto-warn" style="font-size:11px;color:#fde047;margin-top:4px;display:none;">! EVIL OTTO APPROACHING !</div>
+    <div id="hud-exit-hint" style="font-size:10px;color:#4ade80;margin-top:4px;display:none;letter-spacing:0.5px;">EXIT DOORS OPEN — WALK THROUGH ANY DOOR</div>
     <div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end;pointer-events:auto;">
-      <button id="hud-next-sector" style="display:none;background:#0e7490;color:#fff;border:1px solid #22d3ee;padding:4px 8px;font:inherit;font-size:11px;cursor:pointer;">NEXT SECTOR</button>
       <button id="hud-tuning-btn" style="background:#0f172a;color:#38bdf8;border:1px solid #38bdf8;padding:4px 8px;font:inherit;font-size:11px;cursor:pointer;">TUNING [TAB]</button>
     </div>
   `;
@@ -217,7 +217,7 @@ export function createHud(
   const scoreEl = $<HTMLSpanElement>('hud-score');
   const enemiesEl = $<HTMLSpanElement>('hud-enemies');
   const ottoWarnEl = $<HTMLDivElement>('hud-otto-warn');
-  const nextSectorBtn = $<HTMLButtonElement>('hud-next-sector');
+  const exitHintEl = $<HTMLDivElement>('hud-exit-hint');
   const tuningBtn = $<HTMLButtonElement>('hud-tuning-btn');
   const weaponNameEl = $<HTMLDivElement>('hud-weapon-name');
   const weaponModsEl = $<HTMLDivElement>('hud-weapon-mods');
@@ -260,7 +260,6 @@ export function createHud(
   window.addEventListener('keydown', onKeyDown);
 
   tuningBtn.addEventListener('click', () => setTuningOpen(!tuningOpen));
-  nextSectorBtn.addEventListener('click', () => callbacks.onNextSector?.());
   restartBtn.addEventListener('click', () => callbacks.onRestart?.());
 
   meleeSlider.addEventListener('input', () => {
@@ -356,9 +355,9 @@ export function createHud(
       enemiesEl.textContent = String(state.enemies.length);
 
       ottoWarnEl.style.display = state.ottoWarningActive ? 'block' : 'none';
-      nextSectorBtn.style.display =
-        state.bossDefeated && state.boss === null && !state.gameOver
-          ? 'inline-block'
+      exitHintEl.style.display =
+        state.bossDefeated && !state.gameOver && !state.roomTransition
+          ? 'block'
           : 'none';
 
       if (state.boss && state.boss.hp > 0) {

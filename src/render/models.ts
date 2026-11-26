@@ -76,14 +76,26 @@ export function buildHeroModel(): HeroModel {
       const w = z >= 3 ? 14 : 11;
       rect(ctx, z % 2 === 0 ? '#0284c7' : '#0ea5e9', cx - w / 2, cy - 4, w, 7);
       rect(ctx, '#38bdf8', cx - 4, cy - 5, 8, 2);
+      // Glowing cyan chest core across front Z-band (z=1..3)
+      if (z >= 1 && z <= 3) {
+        rect(ctx, '#22d3ee', cx - 2, cy - 6, 4, 2);
+        if (z === 2) rect(ctx, '#ffffff', cx - 1, cy - 6, 2, 1);
+      }
       rect(ctx, '#64748b', cx - 4, cy + 3, 8, 4);
       rect(ctx, '#22d3ee', cx - 2, cy + 6, 4, 1);
     } else if (z === 5) {
       rect(ctx, '#64748b', cx - 3, cy - 3, 6, 6);
     } else {
       const r = z === 9 ? 3 : 4;
-      rect(ctx, '#e2e8f0', cx - r, cy - r, r * 2, r * 2);
-      if (z === 7 || z === 8) rect(ctx, '#facc15', cx - 3, cy - r - 1, 6, 2);
+      rect(ctx, z === 9 ? '#f8fafc' : '#e2e8f0', cx - r, cy - r, r * 2, r * 2);
+      // Distinct 3/4 front face bands: chin breather (z=6), bold gold visor (z=7..8), forehead crest (z=9)
+      if (z === 6) {
+        rect(ctx, '#334155', cx - 3, cy - r - 1, 6, 2);
+        rect(ctx, '#94a3b8', cx - 2, cy - r - 1, 4, 1);
+      } else if (z === 7 || z === 8) {
+        rect(ctx, '#facc15', cx - 3, cy - r - 1, 6, 2);
+        if (z === 8) rect(ctx, '#fef9c3', cx - 2, cy - r - 1, 4, 1);
+      }
     }
   });
   const weaponStacks = {} as Record<WeaponType, Slice[]>;
@@ -134,14 +146,25 @@ export function buildEnforcerFrames(): Slice[][] {
         rect(ctx, joint, cx + 7, cy - 2 - sw, 2, 7);
         rect(ctx, brightRed, cx - 10, cy + 3 + sw, 3, 3);
         rect(ctx, brightRed, cx + 7, cy + 3 - sw, 3, 3);
-        if (z === 6) rect(ctx, '#cbd5e1', cx - 3, cy - 4, 6, 3);
+        if (z === 5 || z === 6) {
+          // Metallic chest grille / core panel on front facade
+          rect(ctx, '#1e293b', cx - 3, cy - 7, 6, 2);
+          rect(ctx, '#cbd5e1', cx - 2, cy - 7, 4, 1);
+        }
       } else {
-        // Rounded dome head with scanning cyclops eye
+        // Rounded dome head: mouth grille (z=9), recessed scanning cyclops eye (z=10), crimson forehead (z=11)
         const hw = z === 11 ? 6 : 8;
         rect(ctx, brightRed, cx - hw / 2, cy - 5, hw, 7);
-        if (z === 10) {
-          rect(ctx, '#64748b', cx - 3, cy - 6, 6, 2);
+        if (z === 9) {
+          rect(ctx, '#1e293b', cx - 3, cy - 6, 6, 2);
+          rect(ctx, '#94a3b8', cx - 2, cy - 6, 1, 1);
+          rect(ctx, '#94a3b8', cx + 1, cy - 6, 1, 1);
+        } else if (z === 10) {
+          rect(ctx, '#0f172a', cx - 4, cy - 6, 8, 2);
           rect(ctx, visor, cx - 2 + Math.sign(sw), cy - 6, 3, 2);
+          rect(ctx, '#ffffff', cx - 1 + Math.sign(sw), cy - 6, 1, 1);
+        } else if (z === 11) {
+          rect(ctx, '#f87171', cx - 2, cy - 6, 4, 1);
         }
       }
     }),
@@ -170,6 +193,11 @@ function buildVBotFrames(primary: string, stripe: string, eyeColor: string): Sli
         if (z === 5 || z === 7) {
           rect(ctx, stripe, cx - w / 2 + 1, cy - 5, w - 2, 2);
         }
+        // Front mouth/vent grille band on lower V-face (z=4..5)
+        if (z === 4 || z === 5) {
+          rect(ctx, '#1e293b', cx - 3, cy - 6, 6, 2);
+          rect(ctx, stripe, cx - 2, cy - 6, 4, 1);
+        }
         // Side claw-arms extending from upper V
         if (z >= 6 && z <= 8) {
           rect(ctx, '#94a3b8', cx - w / 2 - 3, cy - 4 + claw, 3, 6);
@@ -177,11 +205,13 @@ function buildVBotFrames(primary: string, stripe: string, eyeColor: string): Sli
           rect(ctx, lightMetal, cx - w / 2 - 4, cy - 6 + claw, 2, 3);
           rect(ctx, lightMetal, cx + w / 2 + 2, cy - 6 - claw, 2, 3);
         }
-        // Prominent single glowing central optical eye
+        // Prominent single glowing central optical eye in dark housing (z=7..8) + brow (z=9)
         if (z === 7 || z === 8) {
-          rect(ctx, darkMetal, cx - 3, cy - 7, 6, 3);
+          rect(ctx, '#0f172a', cx - 4, cy - 7, 8, 3);
           rect(ctx, eyeColor, cx - 2, cy - 7, 4, 2);
           rect(ctx, '#ffffff', cx - 1, cy - 7, 2, 1);
+        } else if (z === 9) {
+          rect(ctx, lightMetal, cx - 4, cy - 6, 8, 2);
         }
       } else {
         // Top cap + antenna
@@ -242,10 +272,18 @@ export function buildLaserShooterFrames(): Slice[][] {
           rect(ctx, '#ff2a55', cx + 7, cy - 12, 3, 2);
         }
       } else {
-        // Compact sensor head
+        // Sensor head with distinct jaw grille (z=9), glowing cyan visor (z=10), yellow brow (z=11)
         rect(ctx, lightGrey, cx - 5, cy - 4, 10, 7);
         rect(ctx, yellow, cx - 5, cy - 5, 10, 2);
-        rect(ctx, '#22d3ee', cx - 3, cy - 6, 6, 2);
+        if (z === 9) {
+          rect(ctx, '#1e293b', cx - 3, cy - 6, 6, 2);
+        } else if (z === 10) {
+          rect(ctx, '#0f172a', cx - 4, cy - 6, 8, 2);
+          rect(ctx, '#22d3ee', cx - 3, cy - 6, 6, 2);
+          rect(ctx, '#ffffff', cx - 1, cy - 6, 2, 1);
+        } else {
+          rect(ctx, yellow, cx - 4, cy - 6, 8, 2);
+        }
       }
     });
   });
@@ -270,14 +308,23 @@ export function buildGrenadierFrames(): Slice[][] {
         rect(ctx, yellow, cx - 7 + step, cy + 5, 5, 2);
         rect(ctx, yellow, cx + 2 - step, cy + 5, 5, 2);
       } else if (z <= 8) {
-        // Heavy yellow & grey armored hull
+        // Heavy yellow & grey armored hull with front chest core & vent grille
         rect(ctx, light, cx - 8, cy - 6, 16, 10);
         rect(ctx, yellow, cx - 7, cy - 7, 14, 4);
         rect(ctx, orange, cx - 3, cy - 8, 6, 2);
+        if (z === 6 || z === 7) {
+          rect(ctx, '#1e293b', cx - 4, cy - 8, 8, 2);
+          rect(ctx, orange, cx - 2, cy - 8, 4, 2);
+        }
       } else {
-        // 6 fanning shoulder/back mortar barrels
+        // Head visor + 6 fanning shoulder/back mortar barrels
         rect(ctx, metal, cx - 5, cy - 4, 10, 7);
         rect(ctx, yellow, cx - 4, cy - 5, 8, 2);
+        if (z === 9 || z === 10) {
+          rect(ctx, '#0f172a', cx - 4, cy - 6, 8, 2);
+          rect(ctx, '#ef4444', cx - 3, cy - 6, 2, 2);
+          rect(ctx, '#ef4444', cx + 1, cy - 6, 2, 2);
+        }
         const offsets = [-9, -6, -3, 1, 4, 7];
         const lift = z - 8;
         for (const ox of offsets) {
@@ -322,14 +369,26 @@ export function buildMaximilian(): MaximilianModel {
       rect(ctx, steel, cx + 8, cy - 2, 3, 6);
       rect(ctx, '#ef4444', cx - 11, cy + 3, 3, 1);
       rect(ctx, '#ef4444', cx + 8, cy + 3, 3, 1);
-      if (z === 7) rect(ctx, glow, cx - 2, cy - 4, 4, 4);
+      if (z >= 6 && z <= 7) {
+        // Front chest reactor core
+        rect(ctx, '#1e293b', cx - 3, cy - 7, 6, 3);
+        rect(ctx, glow, cx - 2, cy - 7, 4, 2);
+      }
     } else {
       const w = z <= 11 ? 12 : 8;
       rect(ctx, steel, cx - w / 2, cy - 5, w, 7);
       rect(ctx, crimson, cx - w / 2, cy - 6, w, 1);
+      if (z === 9 || z === 10) {
+        // Armored front jaw / breather grille
+        rect(ctx, '#0f172a', cx - 4, cy - 6, 8, 2);
+        rect(ctx, '#94a3b8', cx - 3, cy - 6, 2, 1);
+        rect(ctx, '#94a3b8', cx + 1, cy - 6, 2, 1);
+      }
       if (z >= 11 && z <= 12) {
-        rect(ctx, glow, cx - 4, cy - 3, 8, 2);
-        rect(ctx, '#fecaca', cx - 3, cy - 3, 6, 1);
+        // Blazing red Maximilian horizontal eye visor on front face
+        rect(ctx, '#0f172a', cx - 5, cy - 6, 10, 3);
+        rect(ctx, glow, cx - 4, cy - 6, 8, 2);
+        rect(ctx, '#fecaca', cx - 3, cy - 6, 6, 1);
       }
       if (z === 13) {
         rect(ctx, crimson, cx - 6, cy - 8, 2, 3);
@@ -410,8 +469,13 @@ export function buildRecogniser(): RecogniserModel {
       const h = Math.max(5, 10 - taper);
       rect(ctx, light, cx - w / 2, cy - h / 2, w, h);
       rect(ctx, neonRed, cx - w / 2, cy - h / 2, w, 1);
-      if (z >= 6 && z <= 8) {
-        // Glowing red cockpit viewport / core
+      if (z === 4 || z === 5) {
+        // Lower cockpit intake grille on front face
+        rect(ctx, '#0f172a', cx - 4, cy - h / 2 - 1, 8, 2);
+        rect(ctx, '#94a3b8', cx - 3, cy - h / 2 - 1, 6, 1);
+      } else if (z >= 6 && z <= 8) {
+        // Glowing red cockpit viewport / core on front face
+        rect(ctx, '#0f172a', cx - 4, cy - h / 2 - 1, 8, 3);
         rect(ctx, '#ff2a55', cx - 3, cy - h / 2 - 1, 6, 3);
         rect(ctx, '#fef08a', cx - 1, cy - h / 2 - 1, 2, 2);
       }
@@ -436,9 +500,22 @@ export function buildEvilOtto(): Record<OttoVariant, Slice[]> {
       const w = Math.min(22, z === 0 || z === 9 ? p.size - 4 : p.size);
       rect(ctx, p.body, cx - w / 2, cy - w / 2, w, w);
       rect(ctx, p.glow, cx - w / 2, cy - w / 2, w, 1);
-      if (z === 5 || z === 6) {
-        rect(ctx, p.glow, cx - w / 2 + 2, cy - w / 2 - 1, 3, 3);
-        rect(ctx, p.glow, cx + w / 2 - 5, cy - w / 2 - 1, 3, 3);
+      // Iconic Evil Otto face in 3/4 view: wide sinister grin (z=2..3), glowing angry eyes (z=6..7), brow (z=8)
+      if (z === 2 || z === 3) {
+        rect(ctx, '#090d16', cx - w / 2 + 2, cy - w / 2 - 1, w - 4, 3);
+        rect(ctx, p.glow, cx - w / 2 + 3, cy - w / 2 - 1, w - 6, 2);
+        if (z === 3) {
+          rect(ctx, '#090d16', cx - 1, cy - w / 2 - 1, 2, 2);
+        }
+      } else if (z === 6 || z === 7) {
+        rect(ctx, '#090d16', cx - w / 2 + 1, cy - w / 2 - 1, 4, 3);
+        rect(ctx, '#090d16', cx + w / 2 - 5, cy - w / 2 - 1, 4, 3);
+        rect(ctx, p.glow, cx - w / 2 + 2, cy - w / 2 - 1, 3, 2);
+        rect(ctx, p.glow, cx + w / 2 - 5, cy - w / 2 - 1, 3, 2);
+        rect(ctx, '#ffffff', cx - w / 2 + 3, cy - w / 2 - 1, 1, 1);
+        rect(ctx, '#ffffff', cx + w / 2 - 4, cy - w / 2 - 1, 1, 1);
+      } else if (z === 8) {
+        rect(ctx, p.glow, cx - w / 2 + 2, cy - w / 2 - 1, w - 4, 1);
       }
     });
   });
@@ -472,11 +549,21 @@ export function buildAbb(): Slice[] {
         rect(ctx, orange, cx - 2, cy - 12, 4, 2);
       }
     } else if (z <= 11) {
-      // Swiveling dome turret + twin optical sensor pod
+      // Swiveling dome turret: lower armored grille (z=9), twin optical eyes (z=10), forehead crest (z=11)
       const w = z === 11 ? 10 : 14;
       rect(ctx, lightGrey, cx - w / 2, cy - w / 2, w, w);
-      rect(ctx, '#ef4444', cx - 4, cy - w / 2 - 1, 3, 2);
-      rect(ctx, '#ef4444', cx + 1, cy - w / 2 - 1, 3, 2);
+      if (z === 9) {
+        rect(ctx, '#1e293b', cx - 4, cy - w / 2 - 1, 8, 2);
+        rect(ctx, orange, cx - 3, cy - w / 2 - 1, 6, 1);
+      } else if (z === 10) {
+        rect(ctx, '#0f172a', cx - 5, cy - w / 2 - 1, 10, 2);
+        rect(ctx, '#ef4444', cx - 4, cy - w / 2 - 1, 3, 2);
+        rect(ctx, '#ef4444', cx + 1, cy - w / 2 - 1, 3, 2);
+        rect(ctx, '#fef08a', cx - 3, cy - w / 2 - 1, 1, 1);
+        rect(ctx, '#fef08a', cx + 2, cy - w / 2 - 1, 1, 1);
+      } else {
+        rect(ctx, '#f8fafc', cx - 3, cy - w / 2 - 1, 6, 1);
+      }
     } else {
       // Dual antennae on top
       rect(ctx, '#e2e8f0', cx - 4, cy + 1, 2, 2);
@@ -550,9 +637,13 @@ export function buildSkullhead(): SkullheadModel {
       // Subtle temple accents on back/sides
       rect(ctx, boneShade, cx - 8, cy + 5, 16, 2);
     } else {
-      // Rounded sculpted ivory/light-grey cranium dome tapering to top
+      // Rounded sculpted ivory/light-grey forehead brow ridge & cranium dome tapering to top
       const r = z === 10 ? 7 : z === 11 ? 6 : z === 12 ? 5 : 3;
       rect(ctx, z % 2 === 0 ? ivory : boneLight, cx - r, cy - r, r * 2, r * 2);
+      if (z === 10) {
+        // Pronounced sculpted ivory brow ridge overhanging the recessed eye sockets
+        rect(ctx, '#ffffff', cx - 6, cy - r - 1, 12, 2);
+      }
       if (z === 11 || z === 12) {
         rect(ctx, gold, cx - 1, cy + r - 2, 2, 2);
       }
@@ -633,15 +724,16 @@ export function buildBrainbot(): Slice[] {
     const orangeBrain = '#fb923c';
     const greenEye = '#4ade80';
     if (z <= 3) {
-      // Stubby rolling/walker chassis
+      // Stubby rolling/walker chassis + lower speaker/jaw grille on front
       rect(ctx, '#64748b', cx - 8, cy - 6, 16, 12);
       rect(ctx, metal, cx - 10, cy - 3, 4, 6);
       rect(ctx, metal, cx + 6, cy - 3, 4, 6);
-      rect(ctx, orangeBrain, cx - 4, cy - 7, 8, 2);
-    } else if (z <= 6) {
-      // Collar ring + glowing green central eye
+      rect(ctx, '#1e293b', cx - 4, cy - 7, 8, 2);
+      rect(ctx, orangeBrain, cx - 3, cy - 7, 6, 1);
+    } else if (z <= 7) {
+      // Collar ring + prominent glowing green central eye spanning z=5..7
       rect(ctx, light, cx - 8, cy - 7, 16, 14);
-      rect(ctx, '#64748b', cx - 4, cy - 8, 8, 3);
+      rect(ctx, '#0f172a', cx - 5, cy - 8, 10, 3);
       rect(ctx, greenEye, cx - 3, cy - 8, 6, 2);
       rect(ctx, '#ffffff', cx - 1, cy - 8, 2, 1);
     } else {

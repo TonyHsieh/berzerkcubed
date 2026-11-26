@@ -33,6 +33,9 @@ export function makeSlice(
 
 const DEG2RAD = Math.PI / 180;
 
+/** Milestone 4.13: 3/4 arcade camera pitch vertical foreshortening factor. */
+export const DEFAULT_SLICE_PITCH_Y = 0.64;
+
 /** Dynamic per-layer renderer (Hero, bosses, rotating pickups). */
 export function drawStack(
   ctx: CanvasRenderingContext2D,
@@ -46,6 +49,7 @@ export function drawStack(
   spacingPx: number,
   localOffsetX = 0,
   localOffsetY = 0,
+  slicePitchY = DEFAULT_SLICE_PITCH_Y,
 ): void {
   const rad = (worldAngleDeg + cameraAngleDeg) * DEG2RAD;
   for (let z = 0; z < slices.length; z++) {
@@ -53,6 +57,9 @@ export function drawStack(
     const yLift = startZPx + z * spacingPx;
     ctx.save();
     ctx.translate(screenX, screenY - yLift);
+    if (slicePitchY !== 1) {
+      ctx.scale(1, slicePitchY);
+    }
     ctx.rotate(rad);
     ctx.scale(scale, scale);
     ctx.drawImage(slice, -slice.width / 2 + localOffsetX, -slice.height / 2 + localOffsetY);
@@ -95,6 +102,7 @@ export class SpriteStackCache {
     scale: number,
     spacingPx: number,
     angleSteps = 24,
+    slicePitchY = DEFAULT_SLICE_PITCH_Y,
   ): void {
     if (slices.length === 0) throw new Error(`SpriteStackCache.bake("${key}"): no slices`);
     const sliceSize = Math.max(...slices.map((s) => Math.max(s.width, s.height)));
@@ -111,7 +119,20 @@ export class SpriteStackCache {
       const tctx = tile.getContext('2d');
       if (tctx) {
         tctx.imageSmoothingEnabled = false;
-        drawStack(tctx, slices, tileW / 2, anchorY, i * step, 0, scale, 0, spacingPx);
+        drawStack(
+          tctx,
+          slices,
+          tileW / 2,
+          anchorY,
+          i * step,
+          0,
+          scale,
+          0,
+          spacingPx,
+          0,
+          0,
+          slicePitchY,
+        );
       }
       tiles.push(tile);
     }

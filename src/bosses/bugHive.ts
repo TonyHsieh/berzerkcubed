@@ -124,6 +124,8 @@ export function interceptProjectileWithOrbitingBugs(
     const reach = BUG_RADIUS + proj.radius;
     if (dx * dx + dy * dy <= reach * reach) {
       bug.hp -= proj.damage;
+      boss.hitFlash = 0.12;
+      boss.hitFlashKind = 'shield';
       events.push({ type: 'sfx', sound: 'hit', x: bug.x, y: bug.y });
       if (bug.hp <= 0) {
         events.push({

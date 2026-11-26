@@ -27,6 +27,8 @@ import {
   createGameState,
   createGameStateForSector,
   FIXED_DT,
+  getRoomTransitionMapping,
+  ROOM_TRANSITION_DURATION,
   spawnBoss,
   stepGameState,
 } from './gameState';
@@ -724,5 +726,227 @@ describe('Milestone 4.12 — Hero Death Explosion, Full Loadout Reset & Telefrag
     }
     expect(state.player.lives).toBe(0);
     expect(state.gameOver).toBe(true);
+  });
+});
+
+describe('Milestone 4.13 — Boss Hit-Flash & Classic Door-Walk Push-Slide Transitions', () => {
+  it('triggers boss hitFlash (> 0) on projectile, beam, and orbital damage, distinguishes shield vs core, and decays to 0', () => {
+    const config = createDifficultyConfig();
+    const idle = createDefaultInputState();
+
+    // 1. Core hit by player projectile + beam on Skullhead -> hitFlash = 0.12 ('core'), decays to 0
+    const state = createGameStateForSector(0, config);
+    state.enemies.length = 0;
+    state.waveIndex = state.wavesPerSector;
+    state.player.invulnTimer = 10;
+    const skull = spawnBoss(state, 'skullhead');
+
+    state.playerProjectiles.push({
+      id: 'm413_bolt',
+      owner: 'player',
+      kind: 'bolt',
+      x: skull.x,
+      y: skull.y,
+      z: 14,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      radius: 8,
+      damage: 40,
+      life: 1,
+      maxLife: 1,
+      bouncesLeft: 0,
+      modifiers: [],
+      color: '#38bdf8',
+    });
+    stepGameState(state, idle, FIXED_DT);
+    expect(skull.hitFlash).toBeCloseTo(0.12, 3);
+    expect(skull.hitFlashKind).toBe('core');
+
+    // Step 12 ticks (0.2s > 0.12s) -> hitFlash decays cleanly back to 0
+    for (let t = 0; t < 12; t++) {
+      stepGameState(state, idle, FIXED_DT);
+    }
+    expect(skull.hitFlash).toBe(0);
+
+    // 2. Beam segment triggers hitFlash on Brainbot
+    const beamState = createGameStateForSector(0, config);
+    beamState.enemies.length = 0;
+    beamState.waveIndex = beamState.wavesPerSector;
+    beamState.player.invulnTimer = 10;
+    const brain = spawnBoss(beamState, 'brainbot');
+    beamState.playerProjectiles.push({
+      id: 'm413_beam',
+      owner: 'player',
+      kind: 'beam_segment',
+      x: brain.x,
+      y: brain.y,
+      z: 14,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      radius: 10,
+      damage: 30,
+      life: 1,
+      maxLife: 1,
+      bouncesLeft: 0,
+      modifiers: ['pierce'],
+      color: '#f43f5e',
+    });
+    stepGameState(beamState, idle, FIXED_DT);
+    expect(brain.hitFlash).toBeGreaterThan(0);
+    expect(brain.hitFlashKind).toBe('core');
+
+    // 3. Shield hit on higher-sector boss triggers hitFlashKind === 'shield'
+    const shieldState = createGameStateForSector(2, config);
+    shieldState.enemies.length = 0;
+    shieldState.waveIndex = shieldState.wavesPerSector;
+    shieldState.player.invulnTimer = 10;
+    const shieldedAbb = spawnBoss(shieldState, 'abb');
+    expect(shieldedAbb.shieldLayers).toBeGreaterThanOrEqual(2);
+    shieldState.playerProjectiles.push({
+      id: 'm413_shield_hit',
+      owner: 'player',
+      kind: 'bolt',
+      x: shieldedAbb.x,
+      y: shieldedAbb.y,
+      z: 14,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      radius: 8,
+      damage: 25,
+      life: 1,
+      maxLife: 1,
+      bouncesLeft: 0,
+      modifiers: [],
+      color: '#38bdf8',
+    });
+    stepGameState(shieldState, idle, FIXED_DT);
+    expect(shieldedAbb.hitFlash).toBeCloseTo(0.12, 3);
+    expect(shieldedAbb.hitFlashKind).toBe('shield');
+
+    // 4. Orbital lightsaber slicing a boss triggers hitFlash
+    const orbState = createGameStateForSector(0, config);
+    orbState.enemies.length = 0;
+    orbState.waveIndex = orbState.wavesPerSector;
+    orbState.player.invulnTimer = 10;
+    const abb = spawnBoss(orbState, 'abb');
+    const saber = addOrbital(orbState.player, 'lightsaber');
+    saber.orbitAngle = 0;
+    orbState.player.x = abb.x - saber.orbitRadius;
+    orbState.player.y = abb.y;
+    stepGameState(orbState, idle, FIXED_DT);
+    expect(abb.hitFlash).toBeGreaterThan(0);
+    expect(abb.hp).toBeLessThan(abb.maxHp);
+  });
+
+  it('unlocks all 4 cardinal exit doors on boss defeat and triggers exact push-slide roomTransition for east/west/north/south', () => {
+    const config = createDifficultyConfig();
+    const idle = createDefaultInputState();
+
+    // 1. Defeat sector boss -> all 4 cardinal exit doors immediately unlock (openFraction === 1)
+    const state = createGameStateForSector(0, config);
+    state.enemies.length = 0;
+    state.waveIndex = state.wavesPerSector;
+    state.player.invulnTimer = 10;
+    const boss = spawnBoss(state, 'abb');
+    state.playerProjectiles.push({
+      id: 'm413_boss_kill',
+      owner: 'player',
+      kind: 'bolt',
+      x: boss.x,
+      y: boss.y,
+      z: 14,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      radius: 10,
+      damage: boss.maxHp + 100,
+      life: 1,
+      maxLife: 1,
+      bouncesLeft: 0,
+      modifiers: [],
+      color: '#38bdf8',
+    });
+    stepGameState(state, idle, FIXED_DT);
+    expect(state.bossDefeated).toBe(true);
+    const cardinalDoors = state.island.doors.filter((d) => d.cardinal !== undefined);
+    expect(cardinalDoors).toHaveLength(4);
+    for (const d of cardinalDoors) {
+      expect(d.openFraction).toBe(1);
+    }
+
+    // 2. Verify all 4 cardinal exit walks: opposite entrance doorway, push-slide vector, sectorIndex advance, hero placement
+    const cases: Array<{
+      exitDir: 'east' | 'west' | 'north' | 'south';
+      enterDir: 'west' | 'east' | 'south' | 'north';
+      slideX: number;
+      slideY: number;
+    }> = [
+      { exitDir: 'east', enterDir: 'west', slideX: -1, slideY: 0 },
+      { exitDir: 'west', enterDir: 'east', slideX: 1, slideY: 0 },
+      { exitDir: 'north', enterDir: 'south', slideX: 0, slideY: 1 },
+      { exitDir: 'south', enterDir: 'north', slideX: 0, slideY: -1 },
+    ];
+
+    for (const c of cases) {
+      expect(getRoomTransitionMapping(c.exitDir)).toMatchObject({
+        enterDir: c.enterDir,
+        slideX: c.slideX,
+        slideY: c.slideY,
+      });
+
+      const s = createGameStateForSector(0, config);
+      s.enemies.length = 0;
+      s.waveIndex = s.wavesPerSector;
+      s.bossSpawned = true;
+      s.bossDefeated = true;
+      s.player.invulnTimer = 0;
+      // Step once so updateWorld unlocks all cardinal exit doors
+      stepGameState(s, idle, FIXED_DT);
+
+      const exitDoor = s.island.doors.find((d) => d.cardinal === c.exitDir)!;
+      expect(exitDoor).toBeDefined();
+      expect(exitDoor.openFraction).toBe(1);
+
+      // Position hero at the open exit door threshold
+      s.player.x = exitDoor.x + exitDoor.w * 0.5;
+      s.player.y = exitDoor.y + exitDoor.h * 0.5;
+
+      stepGameState(s, idle, FIXED_DT);
+
+      expect(s.sectorIndex).toBe(1);
+      expect(s.roomTransition).not.toBeNull();
+      expect(s.roomTransition?.active).toBe(true);
+      expect(s.roomTransition?.exitDir).toBe(c.exitDir);
+      expect(s.roomTransition?.enterDir).toBe(c.enterDir);
+      expect(s.roomTransition?.slideX).toBe(c.slideX);
+      expect(s.roomTransition?.slideY).toBe(c.slideY);
+      expect(s.player.invulnTimer).toBeGreaterThan(0);
+
+      // Complete the transition (~0.62s)
+      const ticks = Math.ceil(ROOM_TRANSITION_DURATION / FIXED_DT) + 3;
+      for (let t = 0; t < ticks; t++) {
+        stepGameState(s, idle, FIXED_DT);
+      }
+
+      expect(s.roomTransition).toBeNull();
+      const b = s.island.bounds;
+      // Hero landed cleanly inside the opposite doorway of the new sector
+      if (c.enterDir === 'west') {
+        expect(s.player.x).toBeLessThan(b.x + 200);
+        expect(s.player.x).toBeGreaterThan(b.x + 40);
+      } else if (c.enterDir === 'east') {
+        expect(s.player.x).toBeGreaterThan(b.x + b.w - 200);
+        expect(s.player.x).toBeLessThan(b.x + b.w - 40);
+      } else if (c.enterDir === 'south') {
+        expect(s.player.y).toBeGreaterThan(b.y + b.h - 200);
+        expect(s.player.y).toBeLessThan(b.y + b.h - 40);
+      } else {
+        expect(s.player.y).toBeLessThan(b.y + 200);
+        expect(s.player.y).toBeGreaterThan(b.y + 40);
+      }
+    }
   });
 });

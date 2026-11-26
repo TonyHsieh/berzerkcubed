@@ -266,6 +266,8 @@ export function updateMaximilian(
       0,
       (boss.shieldHp ?? 0) - (heavy ? p.damage : STANDARD_SHOT_SHIELD_DAMAGE),
     );
+    boss.hitFlash = 0.12;
+    boss.hitFlashKind = 'shield';
     events.push({ type: 'sfx', sound: 'electric_zap', x: p.x, y: p.y });
     events.push({
       type: 'vfx_explosion',

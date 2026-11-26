@@ -1,7 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildAllModels, bakeSwarmCaches, enemyCacheKey } from './models';
 import { makeFakeCtx, fakeCanvasFactory, type FakeCtx } from './testCanvas';
-import { SpriteStackCache, makeSlice, quantizeAngleIndex, setCanvasFactory } from './spriteStack';
+import {
+  DEFAULT_SLICE_PITCH_Y,
+  drawStack,
+  SpriteStackCache,
+  makeSlice,
+  quantizeAngleIndex,
+  setCanvasFactory,
+} from './spriteStack';
 
 const asCtx = (c: FakeCtx) => c as unknown as CanvasRenderingContext2D;
 const drawCalls = (c: FakeCtx) => c.calls.filter((x) => x.fn === 'drawImage');
@@ -101,5 +108,27 @@ describe('spriteStack caching', () => {
     expect(models.bugHive.bugBot.length).toBeGreaterThan(0);
     expect(models.brainbot.length).toBeGreaterThan(0);
     expect(models.evilOtto.vortex.length).toBeGreaterThan(0);
+  });
+
+  it('applies 3/4 pitch foreshortening (slicePitchY) before rotate in drawStack and SpriteStackCache.bake', () => {
+    const slices = [makeSlice(24, () => {}), makeSlice(24, () => {})];
+    const ctx = makeFakeCtx();
+    drawStack(asCtx(ctx), slices, 100, 120, 45, 0, 2, 0, 2.8);
+
+    // For each slice: translate -> scale(1, 0.64) -> rotate -> scale(2, 2) -> drawImage
+    const firstSliceOps = ctx.calls.slice(0, 7).map((c) => c.fn);
+    const pitchScaleIdx = firstSliceOps.indexOf('scale');
+    const rotateIdx = firstSliceOps.indexOf('rotate');
+    expect(pitchScaleIdx).toBeGreaterThan(-1);
+    expect(rotateIdx).toBeGreaterThan(pitchScaleIdx);
+    expect(ctx.calls[pitchScaleIdx].args).toEqual([1, DEFAULT_SLICE_PITCH_Y]);
+
+    // SpriteStackCache.bake still bakes 24 quantized tiles with 3/4 pitch intact
+    const cache = new SpriteStackCache();
+    cache.bake('pitched_unit', slices, 2, 2.8);
+    expect(cache.angleSteps('pitched_unit')).toBe(24);
+    const drawCtx = makeFakeCtx();
+    expect(cache.drawCached(asCtx(drawCtx), 'pitched_unit', 80, 90, 30, 0)).toBe(true);
+    expect(drawCalls(drawCtx)).toHaveLength(1);
   });
 });

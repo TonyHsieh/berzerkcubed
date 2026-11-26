@@ -131,8 +131,17 @@ export function damageBossPart(
   if ((boss.shieldLayers ?? 0) > 0 && (boss.shieldHp ?? 0) > 0) {
     boss.shieldHp = Math.max(0, (boss.shieldHp ?? 0) - damage);
     boss.shieldRegenDelay = SHIELD_REGEN_DELAY_SEC;
-    boss.hitFlash = 0.1;
+    boss.hitFlash = 0.12;
+    boss.hitFlashKind = 'shield';
     events.push({ type: 'sfx', sound: 'electric_zap', x: hitX, y: hitY });
+    events.push({
+      type: 'vfx_explosion',
+      x: hitX,
+      y: hitY,
+      z: boss.z + 10,
+      color: '#22d3ee',
+      count: 6,
+    });
     if (boss.shieldHp <= 0) {
       boss.shieldLayers = Math.max(0, (boss.shieldLayers ?? 1) - 1);
       events.push({ type: 'sfx', sound: 'shield_break', x: boss.x, y: boss.y });
@@ -155,7 +164,16 @@ export function damageBossPart(
     const dist = Math.hypot(hitX - boss.x, hitY - boss.y);
     if (dist > boss.radius) return false;
     boss.hp = Math.max(0, boss.hp - damage);
-    boss.hitFlash = 0.15;
+    boss.hitFlash = 0.12;
+    boss.hitFlashKind = 'core';
+    events.push({
+      type: 'vfx_explosion',
+      x: hitX,
+      y: hitY,
+      z: boss.z + 10,
+      color: '#ffffff',
+      count: 6,
+    });
     if (boss.hp <= 0) {
       events.push({
         type: 'vfx_explosion',
@@ -192,7 +210,16 @@ export function damageBossPart(
       }
 
       part.hp = Math.max(0, part.hp - damage);
-      boss.hitFlash = 0.15;
+      boss.hitFlash = 0.12;
+      boss.hitFlashKind = 'core';
+      events.push({
+        type: 'vfx_explosion',
+        x: hitX,
+        y: hitY,
+        z: boss.z + part.offsetZ,
+        color: '#ffffff',
+        count: 6,
+      });
 
       if (part.hp <= 0) {
         part.destroyed = true;

@@ -9,7 +9,7 @@ import {
 import { SpriteStackCache } from '../render/spriteStack';
 
 const SPRITE_SCALE = 2;
-const BASE_LAYER_SPACING = 2.0;
+const BASE_LAYER_SPACING = 2.8;
 
 export const LOAD_STAGES = [
   'LOADING ENGINE & AUDIO MODULES',

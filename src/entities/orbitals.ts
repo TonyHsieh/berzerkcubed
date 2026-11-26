@@ -1,4 +1,5 @@
 import type {
+  BossState,
   EnemyState,
   GameEvent,
   OrbitalState,
@@ -70,6 +71,7 @@ export function updateOrbitals(
   enemyProjectiles: Projectile[],
   dt: number,
   events: GameEvent[],
+  boss?: BossState | null,
 ): Projectile[] {
   const spawned: Projectile[] = [];
   if (dt <= 0 || player.orbitals.length === 0) return spawned;
@@ -87,25 +89,46 @@ export function updateOrbitals(
 
     if (orb.type === 'shooter_drone') {
       if (orb.fireCooldown <= 0) {
-        let nearest: EnemyState | null = null;
+        let targetX = 0;
+        let targetY = 0;
+        let hasTarget = false;
         let nearestDistSq = DRONE_RANGE_PX * DRONE_RANGE_PX;
 
         for (let e = 0; e < enemies.length; e++) {
           const enemy = enemies[e];
-          if (enemy.hp <= 0) continue;
+          if (enemy.hp <= 0 || (enemy.rezTimer ?? 0) > 0) continue;
           const dx = enemy.x - pos.x;
           const dy = enemy.y - pos.y;
           const dSq = dx * dx + dy * dy;
           if (dSq < nearestDistSq) {
             nearestDistSq = dSq;
-            nearest = enemy;
+            targetX = enemy.x;
+            targetY = enemy.y;
+            hasTarget = true;
           }
         }
 
-        if (nearest) {
+        if (
+          boss &&
+          boss.hp > 0 &&
+          (boss.rezTimer ?? 0) <= 0 &&
+          !boss.reconstructing
+        ) {
+          const dx = boss.x - pos.x;
+          const dy = boss.y - pos.y;
+          const dSq = dx * dx + dy * dy;
+          if (dSq < nearestDistSq) {
+            nearestDistSq = dSq;
+            targetX = boss.x;
+            targetY = boss.y;
+            hasTarget = true;
+          }
+        }
+
+        if (hasTarget) {
           droneProjCounter += 1;
-          const dx = nearest.x - pos.x;
-          const dy = nearest.y - pos.y;
+          const dx = targetX - pos.x;
+          const dy = targetY - pos.y;
           const dist = Math.max(0.001, Math.sqrt(dx * dx + dy * dy));
           spawned.push({
             id: `drone_bolt_${droneProjCounter}`,

@@ -28,7 +28,8 @@ import { VfxSystem } from '../render/vfx';
 import type { GameState } from './gameState';
 
 const SPRITE_SCALE = 2;
-const BASE_LAYER_SPACING = 2.0;
+const BASE_LAYER_SPACING = 2.8;
+const PITCH_Z_MULTIPLIER = 1.4; // Maps camera.layerSpacing (2.0) -> 2.8px for 3/4 pitch
 
 /** Default chunk size (world px) for subdividing long walls & doors for rotation-safe depth sorting. */
 export const DEFAULT_WALL_CHUNK_SIZE = 56;
@@ -279,6 +280,7 @@ function renderIslandWorld(
   boss: BossState | null,
   projectiles: Projectile[],
   elapsedTime: number,
+  exitsUnlocked = false,
 ): void {
   const b = island.bounds;
   const outlineColor = island.outline === 'red' ? '#ef4444' : '#22d3ee';
@@ -354,14 +356,56 @@ function renderIslandWorld(
 
   // 3. Synchronized sliding door floor tracks (solid 3D energy-gate panels are
   //    depth-sorted in renderQueue via chunkSlidingDoorForDepthSort + drawDoor3D).
+  //    Milestone 4.13: When boss is defeated, cardinal exit doors glow with a
+  //    bright inviting neon exit pulse and directional chevrons (>>>) pointing out.
   for (let i = 0; i < island.doors.length; i++) {
     const d = island.doors[i];
-    ctx.strokeStyle =
-      d.openFraction >= 0.75
-        ? 'rgba(34, 211, 238, 0.45)'
-        : 'rgba(245, 158, 11, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(d.x, d.y, d.w, d.h);
+    const isUnlockedExit = exitsUnlocked && d.cardinal !== undefined;
+    if (isUnlockedExit && d.cardinal) {
+      const pulse = 0.65 + 0.35 * Math.sin(elapsedTime * 8);
+      ctx.save();
+      ctx.fillStyle = `rgba(74, 222, 128, ${(0.16 + pulse * 0.14).toFixed(2)})`;
+      ctx.fillRect(d.x, d.y, d.w, d.h);
+      ctx.shadowColor = '#4ade80';
+      ctx.shadowBlur = 16;
+      ctx.strokeStyle = `rgba(74, 222, 128, ${(0.7 + pulse * 0.3).toFixed(2)})`;
+      ctx.lineWidth = 2.5;
+      ctx.strokeRect(d.x, d.y, d.w, d.h);
+
+      // Directional exit chevrons (>>>) pointing outward from each open cardinal doorway
+      const dcx = d.x + d.w * 0.5;
+      const dcy = d.y + d.h * 0.5;
+      const dirAngle =
+        d.cardinal === 'east'
+          ? 0
+          : d.cardinal === 'south'
+            ? Math.PI * 0.5
+            : d.cardinal === 'west'
+              ? Math.PI
+              : -Math.PI * 0.5;
+      ctx.translate(dcx, dcy);
+      ctx.rotate(dirAngle);
+      ctx.strokeStyle = '#fef08a';
+      ctx.lineWidth = 2.5;
+      for (let c = 0; c < 3; c++) {
+        const wave = ((elapsedTime * 3.2 + c * 0.33) % 1);
+        const cxOff = -18 + c * 14 + wave * 8;
+        ctx.globalAlpha = 0.45 + 0.55 * (1 - Math.abs(wave - 0.5) * 2);
+        ctx.beginPath();
+        ctx.moveTo(cxOff - 5, -9);
+        ctx.lineTo(cxOff + 4, 0);
+        ctx.lineTo(cxOff - 5, 9);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else {
+      ctx.strokeStyle =
+        d.openFraction >= 0.75
+          ? 'rgba(34, 211, 238, 0.45)'
+          : 'rgba(245, 158, 11, 0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(d.x, d.y, d.w, d.h);
+    }
   }
 
   // 4. Walls are drawn in the depth-sorted renderQueue as extruded 3D blocks
@@ -922,6 +966,8 @@ function drawBoss(
 
   ctx.save();
   const bossRezPhase = rezzing ? rezFlashPhase(rezProg) : null;
+  const hitFlashing = boss.hitFlash > 0 && !rezzing;
+  const isShieldHit = boss.hitFlashKind === 'shield';
   if (rezzing && bossRezPhase) {
     // 0%..80%: ghosted inside rising scanline clip; 80%..100%: hidden under opaque flash silhouette
     if (bossRezPhase.entityAlpha <= 0) {
@@ -938,6 +984,11 @@ function drawBoss(
       );
       ctx.clip();
     }
+  } else if (hitFlashing) {
+    // Milestone 4.13: Crisp bright-white (core) or electric cyan/amber (shield) flash pass
+    ctx.filter = isShieldHit
+      ? 'brightness(2.8) contrast(1.3) saturate(2.0)'
+      : 'brightness(3.5) contrast(1.4)';
   }
 
   if (boss.kind === 'maximilian') {
@@ -1240,6 +1291,43 @@ function drawBoss(
     }
   }
   ctx.restore();
+
+  // Milestone 4.13: Unmistakable boss hit-flash rim + silhouette pulse + radial sparks
+  if (hitFlashing) {
+    const flashAlpha = Math.max(0.25, Math.min(1, boss.hitFlash / 0.12));
+    const rimPrimary = isShieldHit ? '#22d3ee' : '#ffffff';
+    const rimAccent = isShieldHit ? '#fbbf24' : '#ff2a55';
+    const centerY = screenY - zLift - 26;
+    ctx.save();
+    ctx.globalAlpha = flashAlpha * 0.42;
+    ctx.fillStyle = rimPrimary;
+    ctx.beginPath();
+    ctx.ellipse(screenX, centerY, boss.radius * 0.92, boss.radius * 0.78, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = flashAlpha;
+    ctx.shadowColor = rimAccent;
+    ctx.shadowBlur = 22;
+    ctx.strokeStyle = rimPrimary;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(screenX, centerY, boss.radius * 1.05, boss.radius * 0.86, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Punchy radial hit-spark burst
+    ctx.strokeStyle = rimAccent;
+    ctx.lineWidth = 2.5;
+    for (let s = 0; s < 8; s++) {
+      const a = (s * Math.PI) / 4 + elapsedTime * 12;
+      const r0 = boss.radius * 0.72;
+      const r1 = boss.radius * (1.18 + flashAlpha * 0.25);
+      ctx.beginPath();
+      ctx.moveTo(screenX + Math.cos(a) * r0, centerY + Math.sin(a) * r0 * 0.78);
+      ctx.lineTo(screenX + Math.cos(a) * r1, centerY + Math.sin(a) * r1 * 0.78);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
 
   // Boss firing flash
   if ((boss.fireAnimTimer ?? 0) > 0 && !rezzing) {
@@ -1573,7 +1661,7 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
     ): void {
       const camera = state.camera;
       const camAngle = camera.angleDeg;
-      const spacingPx = camera.layerSpacing * camera.tiltScale;
+      const spacingPx = camera.layerSpacing * camera.tiltScale * PITCH_Z_MULTIPLIER;
       const zScale = spacingPx * 0.5;
       const project = (wx: number, wy: number) =>
         worldToScreen(wx, wy, camera, width, height);
@@ -1583,8 +1671,33 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
       // 1. Parallax cyber-circuit PCB background
       circuitBg.render(ctx, camera, width, height);
 
-      // 2. Floating platform island in camera-rotated world coordinates
       const shake = getCameraShakeOffset(camera);
+      const tr = state.roomTransition && state.roomTransition.active ? state.roomTransition : null;
+      const trEase = tr ? 1 - Math.pow(1 - tr.progress, 3) : 1;
+
+      // Milestone 4.13: Outgoing room push-slides out & fades during door-walk transition
+      if (tr) {
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, 1 - trEase);
+        ctx.translate(tr.slideX * width * trEase, tr.slideY * height * trEase);
+        ctx.translate(width * 0.5 + shake.x, height * 0.5 + shake.y);
+        ctx.rotate((camAngle * Math.PI) / 180);
+        ctx.translate(-tr.outgoingCameraX, -tr.outgoingCameraY);
+        renderIslandWorld(ctx, tr.outgoingIsland, null, [], state.elapsedTime, true);
+        ctx.restore();
+      }
+
+      // Incoming / active room transform (slides in & fades in during transition)
+      ctx.save();
+      if (tr) {
+        ctx.globalAlpha = Math.min(1, 0.2 + trEase * 0.8);
+        ctx.translate(
+          -tr.slideX * width * (1 - trEase),
+          -tr.slideY * height * (1 - trEase),
+        );
+      }
+
+      // 2. Floating platform island in camera-rotated world coordinates
       ctx.save();
       ctx.translate(width * 0.5 + shake.x, height * 0.5 + shake.y);
       ctx.rotate((camAngle * Math.PI) / 180);
@@ -1595,6 +1708,7 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
         state.boss,
         [...state.playerProjectiles, ...state.enemyProjectiles, ...state.bossProjectiles],
         state.elapsedTime,
+        state.bossDefeated,
       );
       ctx.restore();
 
@@ -1944,6 +2058,9 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
       for (let i = 0; i < renderQueue.length; i++) {
         renderQueue[i].draw(ctx);
       }
+
+      // Close incoming / active room push-slide transform
+      ctx.restore();
 
       // 4. Pooled VFX particles + optional CRT scanline overlay
       vfx.render(ctx, project, camera);

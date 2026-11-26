@@ -154,6 +154,8 @@ export interface WallSegment {
   destructible: boolean;
 }
 
+export type CardinalDirection = 'north' | 'south' | 'east' | 'west';
+
 export interface SlidingDoor {
   id: string;
   x: number;
@@ -163,6 +165,27 @@ export interface SlidingDoor {
   syncGroup: number;
   periodSec: number;
   openFraction: number; // 0 = closed, 1 = fully open
+  /** Milestone 4.13: set on perimeter cardinal exit doors (north/south/east/west). */
+  cardinal?: CardinalDirection;
+}
+
+export interface RoomTransitionState {
+  active: boolean;
+  exitDir: CardinalDirection;
+  enterDir: CardinalDirection;
+  /** Unit push-slide vector: east->(-1,0), west->(1,0), north->(0,1), south->(0,-1). */
+  slideX: number;
+  slideY: number;
+  /** Linear progress 0..1 over durationSec. */
+  progress: number;
+  durationSec: number;
+  heroStartX: number;
+  heroStartY: number;
+  heroEndX: number;
+  heroEndY: number;
+  outgoingIsland: PlatformIsland;
+  outgoingCameraX: number;
+  outgoingCameraY: number;
 }
 
 export interface TempBridge {
@@ -359,6 +382,8 @@ export interface BossState {
   // Bug Hive orbiting bug-bot shield
   orbitingBugs?: OrbitingBugBot[];
   hitFlash: number;
+  /** Milestone 4.13: differentiates shield-hit flash (cyan/amber) from core-HP flash (white/red). */
+  hitFlashKind?: 'core' | 'shield';
 }
 
 // ---------- Events & Difficulty Config ----------

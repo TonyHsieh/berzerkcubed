@@ -2,7 +2,7 @@
 // Enable with ?gallery=1. Renders enlarged rotating Approach B turntables of
 // every model so silhouettes can be visually approved up close.
 import type { ModelSet } from '../render/models';
-import { drawStack } from '../render/spriteStack';
+import { DEFAULT_SLICE_PITCH_Y, drawStack } from '../render/spriteStack';
 import type { SpriteStackCache } from '../render/spriteStack';
 
 export function isGalleryEnabled(search: string): boolean {
@@ -154,6 +154,9 @@ export function createModelGallery(
         4.5,
         0,
         3.0,
+        0,
+        0,
+        DEFAULT_SLICE_PITCH_Y,
       );
     }
     raf = requestAnimationFrame(draw);

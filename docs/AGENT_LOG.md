@@ -192,3 +192,26 @@ Spec: `docs/specs/milestone-4.12-tweaks.md`.
 - **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
   - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed, built in 2.27s).
   - `pnpm test` (`vitest run`): **PASSED** — **15 test files passed (15), 108 tests passed (108)** (all 102 prior tests + 6 new Milestone 4.12 tests).
+
+---
+
+## Milestone 4.13 — Boss Hit-Flash, Classic Door-Walk Push-Slide Room Transitions & 3/4 Face-Forward Sprite Perspective
+
+Spec: `docs/specs/milestone-4.13-tweaks.md`.
+
+- **Files modified**:
+  - `src/engine/types.ts` — added `CardinalDirection`, `SlidingDoor.cardinal`, `RoomTransitionState`, and `BossState.hitFlashKind` (`'core' | 'shield'`).
+  - `src/bosses/recogniser.ts`, `src/bosses/maximilian.ts`, `src/bosses/bugHive.ts` — set `boss.hitFlash = 0.12` and `boss.hitFlashKind` (`'core'` vs `'shield'`) across all boss core/part/shield/bug-intercept damage paths with hit sparks.
+  - `src/entities/orbitals.ts` — updated `updateOrbitals(..., boss?)` so orbiting `shooter_drone` orbitals also target active bosses.
+  - `src/world/levelData.ts` — ensured all 4 cardinal doorways (`north`/`south`/`east`/`west`) exist and are tagged with `cardinal` on every sector; exported `getDoorwayEntryPosition(island, enterDir, inset?)`.
+  - `src/world/worldSim.ts` — exported `unlockCardinalExitDoors(island)` and extended `updateWorld(island, timeSec, dt, exitsUnlocked?)` to keep cardinal exit doors open (`openFraction = 1`) and bridges active once the sector boss is defeated.
+  - `src/game/gameState.ts` — added `GameState.roomTransition`, exported `ROOM_TRANSITION_DURATION` (`0.62`), `getRoomTransitionMapping`, `detectOpenExitDoorWalk`, and `startRoomTransition`; wired boss defeat door unlocking, door-walk push-slide transitions (`east->west (-1,0)`, `west->east (1,0)`, `north->south (0,1)`, `south->north (0,-1)`) with invulnerable auto-walk-in, `updateOrbitals(..., state.boss)`, and lightsaber-vs-boss damage triggering `boss.hitFlash`.
+  - `src/game/hud.ts` — removed the manual `"NEXT SECTOR"` button and replaced it with the `"EXIT DOORS OPEN — WALK THROUGH ANY DOOR"` status hint shown after boss defeat.
+  - `src/game/renderer.ts` — rendered boss hit-flash overlays (`ctx.filter` brightness/contrast flash + pulsing core white/red or shield cyan/amber rim & radial sparks), glowing open cardinal exit doors with outward directional chevrons (`>>>`), cubic-eased push-slide + cross-fade room transitions, and 3/4 vertical Z-spacing (`BASE_LAYER_SPACING = 2.8`, `PITCH_Z_MULTIPLIER = 1.4`).
+  - `src/render/spriteStack.ts` — exported `DEFAULT_SLICE_PITCH_Y = 0.64`; upgraded `drawStack` and `SpriteStackCache.bake` to apply `ctx.scale(1, slicePitchY)` before `ctx.rotate(rad)` while preserving 24-angle caching and headless compatibility.
+  - `src/render/models.ts` — sculpted expressive 3/4 front faces across clear vertical Z-bands (mouths/grilles, eyes/visors, chest cores, foreheads/brows) for Skullhead, Hero, Enforcer, V-Bots, Laser Shooter, Grenadier, Maximilian, Recogniser, Evil Otto (added sinister grin + angry eyes), ABB, and Brainbot.
+  - `src/game/loading.ts` & `src/game/gallery.ts` — synced `BASE_LAYER_SPACING = 2.8` and `DEFAULT_SLICE_PITCH_Y = 0.64` so the `?gallery=1` Model Gallery renders with the exact same 3/4 pitch.
+  - `src/game/gameState.test.ts` (+2) & `src/render/spriteStack.test.ts` (+1) — added 3 Milestone 4.13 Vitest tests covering boss `hitFlash` trigger/shield-vs-core/decay, boss defeat door unlock + all 4 cardinal door-walk push-slide transitions, and 3/4 `slicePitchY` foreshortening before `rotate` with 24-angle caching.
+- **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed, built in 2.41s).
+  - `pnpm test` (`vitest run`): **PASSED** — **15 test files passed (15), 111 tests passed (111)** (all 108 prior tests + 3 new Milestone 4.13 tests).

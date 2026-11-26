@@ -116,14 +116,36 @@ export function setBridgeActive(
   return true;
 }
 
+/**
+ * Milestone 4.13: Unlocks all cardinal exit doors (north/south/east/west) and
+ * activates all cardinal bridges when the sector boss is defeated.
+ */
+export function unlockCardinalExitDoors(island: PlatformIsland): void {
+  for (let i = 0; i < island.doors.length; i++) {
+    const door = island.doors[i];
+    if (door.cardinal !== undefined) {
+      door.openFraction = 1;
+    }
+  }
+  for (let i = 0; i < island.bridges.length; i++) {
+    island.bridges[i].active = true;
+  }
+}
+
 export function updateWorld(
   island: PlatformIsland,
   timeSec: number,
   dt: number,
+  exitsUnlocked = false,
 ): void {
-  // 1. Synchronized sliding doors: all doors sharing a syncGroup move in lockstep
+  // 1. Synchronized sliding doors: all doors sharing a syncGroup move in lockstep.
+  //    When sector exits are unlocked (boss defeated), cardinal exit doors stay fully open.
   for (let i = 0; i < island.doors.length; i++) {
     const door = island.doors[i];
+    if (exitsUnlocked && door.cardinal !== undefined) {
+      door.openFraction = 1;
+      continue;
+    }
     const period = Math.max(0.5, door.periodSec);
     const phaseOffset = (door.syncGroup % 2) * 0.5;
     const cycle = (((timeSec / period) + phaseOffset) % 1 + 1) % 1;
@@ -132,9 +154,13 @@ export function updateWorld(
     door.openFraction = clamp(raw, 0, 1);
   }
 
-  // 2. Temporary horde bridges cycle open/closed in staggered pairs
+  // 2. Temporary horde bridges cycle open/closed in staggered pairs (or stay active when exits unlocked)
   for (let i = 0; i < island.bridges.length; i++) {
     const bridge = island.bridges[i];
+    if (exitsUnlocked) {
+      bridge.active = true;
+      continue;
+    }
     const phaseShift = (i % 2) * (BRIDGE_CYCLE_SEC * 0.5);
     const t = (((timeSec + phaseShift) % BRIDGE_CYCLE_SEC) + BRIDGE_CYCLE_SEC) % BRIDGE_CYCLE_SEC;
     bridge.active = t < BRIDGE_ACTIVE_WINDOW_SEC;

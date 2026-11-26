@@ -1,4 +1,5 @@
 import type {
+  CardinalDirection,
   DestructibleCrate,
   OutlineTheme,
   PlatformIsland,
@@ -67,6 +68,30 @@ export function getDoorwayAnchors(island: PlatformIsland): Vec2[] {
     }
   }
   return anchors;
+}
+
+/**
+ * Milestone 4.13: Returns the world-space position inside the specified cardinal
+ * entrance doorway (`inset` px inside `island.bounds`).
+ */
+export function getDoorwayEntryPosition(
+  island: PlatformIsland,
+  enterDir: CardinalDirection,
+  inset = WALL_THICKNESS + 76,
+): Vec2 {
+  const b = island.bounds;
+  const cx = b.x + b.w * 0.5;
+  const cy = b.y + b.h * 0.5;
+  switch (enterDir) {
+    case 'north':
+      return { x: cx, y: b.y + inset };
+    case 'south':
+      return { x: cx, y: b.y + b.h - inset };
+    case 'west':
+      return { x: b.x + inset, y: cy };
+    case 'east':
+      return { x: b.x + b.w - inset, y: cy };
+  }
 }
 
 /**
@@ -186,11 +211,12 @@ export function createSectorIsland(sectorIndex: number, seed?: number): Platform
   const gateGap = BRIDGE_WIDTH + 52;
   const halfGap = gateGap / 2;
 
-  // 2-4 cardinal doorways: north & east are always open; south & west are seed-driven
+  // Milestone 4.13: All 4 cardinal doorways (north/south/east/west) exist on every
+  // sector so defeating the boss unlocks all 4 exits for classic Berzerk door-walk transitions.
   const openNorth = true;
   const openEast = true;
-  const openSouth = rng() > 0.35;
-  const openWest = rng() > 0.35;
+  const openSouth = true;
+  const openWest = true;
 
   if (hasPerimeterWalls) {
     if (openNorth) {
@@ -431,12 +457,14 @@ export function createSectorIsland(sectorIndex: number, seed?: number): Platform
     if (internal) internal.electrified = true;
   }
 
-  // Synchronized sliding doors (group 0 = perimeter gates, group 1 = interior chokepoints)
+  // Synchronized sliding doors (group 0 = all 4 cardinal exit gates, group 1 = interior chokepoints)
   const innerDoorX = -75 + jitter(50);
   const innerDoorY = Math.round(halfH * 0.62);
   doors.push(
-    { id: `s${safeIndex}_door_north`, x: -halfGap, y: -halfH + 4, w: gateGap, h: DOOR_THICKNESS, syncGroup: 0, periodSec: 6.0, openFraction: 0 },
-    { id: `s${safeIndex}_door_south`, x: -halfGap, y: halfH - DOOR_THICKNESS - 4, w: gateGap, h: DOOR_THICKNESS, syncGroup: 0, periodSec: 6.0, openFraction: 0 },
+    { id: `s${safeIndex}_door_north`, x: -halfGap, y: -halfH + 4, w: gateGap, h: DOOR_THICKNESS, syncGroup: 0, periodSec: 6.0, openFraction: 0, cardinal: 'north' },
+    { id: `s${safeIndex}_door_south`, x: -halfGap, y: halfH - DOOR_THICKNESS - 4, w: gateGap, h: DOOR_THICKNESS, syncGroup: 0, periodSec: 6.0, openFraction: 0, cardinal: 'south' },
+    { id: `s${safeIndex}_door_west`, x: -halfW + 4, y: -halfGap, w: DOOR_THICKNESS, h: gateGap, syncGroup: 0, periodSec: 6.0, openFraction: 0, cardinal: 'west' },
+    { id: `s${safeIndex}_door_east`, x: halfW - DOOR_THICKNESS - 4, y: -halfGap, w: DOOR_THICKNESS, h: gateGap, syncGroup: 0, periodSec: 6.0, openFraction: 0, cardinal: 'east' },
     { id: `s${safeIndex}_door_inner_n`, x: innerDoorX, y: -innerDoorY - DOOR_THICKNESS / 2, w: 150, h: DOOR_THICKNESS, syncGroup: 1, periodSec: 6.0, openFraction: 1 },
     { id: `s${safeIndex}_door_inner_s`, x: innerDoorX, y: innerDoorY - DOOR_THICKNESS / 2, w: 150, h: DOOR_THICKNESS, syncGroup: 1, periodSec: 6.0, openFraction: 1 },
   );

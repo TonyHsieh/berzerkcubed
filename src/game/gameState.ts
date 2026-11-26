@@ -27,6 +27,7 @@ import type {
   BossKind,
   BossState,
   CameraState,
+  CardinalDirection,
   DifficultyConfig,
   EnemyState,
   GameEvent,
@@ -35,8 +36,9 @@ import type {
   PlayerState,
   PowerUpPickup,
   Projectile,
+  RoomTransitionState,
 } from '../engine/types';
-import { updateOrbitals } from '../entities/orbitals';
+import { getOrbitalWorldPos, updateOrbitals } from '../entities/orbitals';
 import {
   applyDodgeShove,
   applyPowerUp,
@@ -61,10 +63,11 @@ import {
   weaponPickupLabel,
 } from '../entities/weapons';
 import { damageCrate } from '../world/crate';
-import { createSectorIsland } from '../world/levelData';
+import { createSectorIsland, getDoorwayEntryPosition } from '../world/levelData';
 import {
   pointHitsSolidWall,
   resolveEntityAgainstWorld,
+  unlockCardinalExitDoors,
   updateWorld,
 } from '../world/worldSim';
 
@@ -82,6 +85,11 @@ const INITIAL_WAVE_DELAY_SEC = 0.5;
 const POST_REZ_HALO_SEC = 0.15;
 const TELEFRAG_BOSS_DAMAGE = 120;
 const TELEFRAG_BOSS_KNOCKBACK = 320;
+const LIGHTSABER_BOSS_HIT_RADIUS = 16;
+const LIGHTSABER_BOSS_DPS = 120;
+
+/** Milestone 4.13: Duration (seconds) of the classic door-walk push-slide room transition. */
+export const ROOM_TRANSITION_DURATION = 0.62;
 
 export interface GameState {
   island: PlatformIsland;
@@ -112,6 +120,8 @@ export interface GameState {
   waveSpawnTimer: number;
   bossSpawned: boolean;
   bossDefeated: boolean;
+  /** Milestone 4.13: active push-slide room transition when walking through an open exit door. */
+  roomTransition: RoomTransitionState | null;
   gameOver: boolean;
   viewport: { width: number; height: number };
 }
@@ -173,6 +183,7 @@ export function createGameStateForSector(
     waveSpawnTimer: INITIAL_WAVE_DELAY_SEC,
     bossSpawned: false,
     bossDefeated: false,
+    roomTransition: null,
     gameOver: false,
     viewport: { width: 1280, height: 720 },
   };
@@ -274,6 +285,148 @@ export function advanceToNextSector(state: GameState): GameState {
   next.viewport = { ...state.viewport };
   Object.assign(state, next);
   return state;
+}
+
+/**
+ * Milestone 4.13: Maps a cardinal exit direction to the opposite entrance doorway
+ * and unit screen push-slide vector:
+ * - east  -> enter west,  slide (-1,  0) (left)
+ * - west  -> enter east,  slide ( 1,  0) (right)
+ * - north -> enter south, slide ( 0,  1) (down)
+ * - south -> enter north, slide ( 0, -1) (up)
+ */
+export function getRoomTransitionMapping(exitDir: CardinalDirection): {
+  enterDir: CardinalDirection;
+  slideX: number;
+  slideY: number;
+  walkAngleDeg: number;
+} {
+  switch (exitDir) {
+    case 'east':
+      return { enterDir: 'west', slideX: -1, slideY: 0, walkAngleDeg: 90 };
+    case 'west':
+      return { enterDir: 'east', slideX: 1, slideY: 0, walkAngleDeg: 270 };
+    case 'north':
+      return { enterDir: 'south', slideX: 0, slideY: 1, walkAngleDeg: 0 };
+    case 'south':
+      return { enterDir: 'north', slideX: 0, slideY: -1, walkAngleDeg: 180 };
+  }
+}
+
+/**
+ * Milestone 4.13: Returns the cardinal direction if the player has walked past
+ * the threshold of an open cardinal exit door, otherwise `null`.
+ */
+export function detectOpenExitDoorWalk(
+  player: PlayerState,
+  island: PlatformIsland,
+): CardinalDirection | null {
+  for (let i = 0; i < island.doors.length; i++) {
+    const door = island.doors[i];
+    if (!door.cardinal || door.openFraction < 0.75) continue;
+
+    if (door.cardinal === 'east') {
+      if (
+        player.x + player.radius >= door.x &&
+        player.y >= door.y &&
+        player.y <= door.y + door.h
+      ) {
+        return 'east';
+      }
+    } else if (door.cardinal === 'west') {
+      if (
+        player.x - player.radius <= door.x + door.w &&
+        player.y >= door.y &&
+        player.y <= door.y + door.h
+      ) {
+        return 'west';
+      }
+    } else if (door.cardinal === 'north') {
+      if (
+        player.y - player.radius <= door.y + door.h &&
+        player.x >= door.x &&
+        player.x <= door.x + door.w
+      ) {
+        return 'north';
+      }
+    } else if (door.cardinal === 'south') {
+      if (
+        player.y + player.radius >= door.y &&
+        player.x >= door.x &&
+        player.x <= door.x + door.w
+      ) {
+        return 'south';
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Milestone 4.13: Starts a classic door-walk push-slide room transition into
+ * `sectorIndex + 1`, placing the hero at the opposite entrance doorway and
+ * auto-walking them into the safe entry zone while invulnerable.
+ */
+export function startRoomTransition(
+  state: GameState,
+  exitDir: CardinalDirection,
+): RoomTransitionState {
+  const outgoingIsland = state.island;
+  const outgoingCameraX = state.camera.x;
+  const outgoingCameraY = state.camera.y;
+  const mapping = getRoomTransitionMapping(exitDir);
+
+  const next = createGameStateForSector(
+    state.sectorIndex + 1,
+    state.config,
+    state.player,
+    state.score,
+  );
+  next.elapsedTime = state.elapsedTime;
+  next.viewport = { ...state.viewport };
+
+  const heroStart = getDoorwayEntryPosition(next.island, mapping.enterDir, 24);
+  const heroEnd = getDoorwayEntryPosition(next.island, mapping.enterDir, 108);
+
+  next.player.x = heroStart.x;
+  next.player.y = heroStart.y;
+  next.player.vx = 0;
+  next.player.vy = 0;
+  next.player.lastSafeX = heroEnd.x;
+  next.player.lastSafeY = heroEnd.y;
+  next.player.legAngle = mapping.walkAngleDeg;
+  next.player.aimAngle = mapping.walkAngleDeg;
+  next.player.invulnTimer = Math.max(
+    next.player.invulnTimer,
+    ROOM_TRANSITION_DURATION + 0.6,
+  );
+
+  next.camera.x = heroEnd.x;
+  next.camera.y = heroEnd.y;
+  next.camera.angleDeg = state.camera.angleDeg;
+  next.camera.targetAngleDeg = state.camera.targetAngleDeg;
+
+  const transition: RoomTransitionState = {
+    active: true,
+    exitDir,
+    enterDir: mapping.enterDir,
+    slideX: mapping.slideX,
+    slideY: mapping.slideY,
+    progress: 0,
+    durationSec: ROOM_TRANSITION_DURATION,
+    heroStartX: heroStart.x,
+    heroStartY: heroStart.y,
+    heroEndX: heroEnd.x,
+    heroEndY: heroEnd.y,
+    outgoingIsland,
+    outgoingCameraX,
+    outgoingCameraY,
+  };
+  next.roomTransition = transition;
+  next.events.push({ type: 'sfx', sound: 'door_hum', x: heroEnd.x, y: heroEnd.y });
+
+  Object.assign(state, next);
+  return transition;
 }
 
 const SECTOR_BOSS_ROTATION: readonly BossKind[] = [
@@ -780,6 +933,7 @@ export function telefragTargets(
       boss.x += nx * Math.max(0, hitDist - dist + 16);
       boss.y += ny * Math.max(0, hitDist - dist + 16);
       boss.hitFlash = 0.2;
+      boss.hitFlashKind = 'core';
       if ((boss.rezTimer ?? 0) <= 0 && !boss.reconstructing) {
         boss.hp = Math.max(1, boss.hp - TELEFRAG_BOSS_DAMAGE);
       }
@@ -915,6 +1069,32 @@ export function stepGameState(
   }
 
   state.elapsedTime += clampedDt;
+
+  // Milestone 4.13: Classic door-walk push-slide room transition
+  if (state.roomTransition && state.roomTransition.active) {
+    const tr = state.roomTransition;
+    tr.progress = Math.min(1, tr.progress + clampedDt / Math.max(0.05, tr.durationSec));
+    const eased = 1 - Math.pow(1 - tr.progress, 3);
+    state.player.x = tr.heroStartX + (tr.heroEndX - tr.heroStartX) * eased;
+    state.player.y = tr.heroStartY + (tr.heroEndY - tr.heroStartY) * eased;
+    state.player.vx = 0;
+    state.player.vy = 0;
+    state.player.runCycle = (state.player.runCycle + clampedDt * 12) % 4;
+    state.player.invulnTimer = Math.max(state.player.invulnTimer, 0.5);
+    state.camera.x = tr.heroEndX;
+    state.camera.y = tr.heroEndY;
+
+    if (tr.progress >= 1) {
+      state.player.x = tr.heroEndX;
+      state.player.y = tr.heroEndY;
+      state.player.lastSafeX = tr.heroEndX;
+      state.player.lastSafeY = tr.heroEndY;
+      tr.active = false;
+      state.roomTransition = null;
+    }
+    return state;
+  }
+
   state.sectorTime += clampedDt;
 
   if (state.toast) {
@@ -937,7 +1117,7 @@ export function stepGameState(
   }
 
   // 1. World simulation (sliding doors, temporary bridges, crate hitFlash decay)
-  updateWorld(state.island, state.elapsedTime, clampedDt);
+  updateWorld(state.island, state.elapsedTime, clampedDt, state.bossDefeated);
 
   // 2. Rebuild SpatialGrid for O(1) swarm & projectile queries
   state.grid.clear();
@@ -967,10 +1147,19 @@ export function stepGameState(
     applyDodgeShove(state.player, state.enemies, state.config);
   }
 
+  // 3b. Milestone 4.13: Walking past an open cardinal exit door triggers push-slide transition
+  if (heroActive && state.bossDefeated) {
+    const exitDir = detectOpenExitDoorWalk(state.player, state.island);
+    if (exitDir) {
+      startRoomTransition(state, exitDir);
+      return state;
+    }
+  }
+
   // 4. Camera update
   updateCamera(state.camera, state.player, input, clampedDt);
 
-  // 5. Orbitals update (can intercept both enemy & boss projectiles)
+  // 5. Orbitals update (can intercept both enemy & boss projectiles, drones target boss)
   if (heroActive) {
     const hostileView: Projectile[] =
       state.bossProjectiles.length > 0
@@ -982,9 +1171,29 @@ export function stepGameState(
       hostileView,
       clampedDt,
       state.events,
+      state.boss,
     );
     if (droneShots.length > 0) {
       state.playerProjectiles.push(...droneShots);
+    }
+
+    // Milestone 4.13: Orbiting lightsabers slice bosses and trigger boss hitFlash
+    if (state.boss && state.boss.hp > 0) {
+      for (let i = 0; i < state.player.orbitals.length; i++) {
+        const orb = state.player.orbitals[i];
+        if (orb.type !== 'lightsaber') continue;
+        const pos = getOrbitalWorldPos(state.player, orb);
+        const res = applyProjectileToBoss(
+          state,
+          pos.x,
+          pos.y,
+          LIGHTSABER_BOSS_HIT_RADIUS,
+          LIGHTSABER_BOSS_DPS * clampedDt,
+        );
+        if (res.damaged) {
+          state.events.push({ type: 'sfx', sound: 'hit', x: pos.x, y: pos.y });
+        }
+      }
     }
   }
 
@@ -1246,6 +1455,7 @@ export function stepGameState(
     if (defeated.kind !== 'evil_otto') {
       state.bossDefeated = true;
       state.ottoTimer = 0;
+      unlockCardinalExitDoors(state.island);
     }
     state.boss = null;
   }
