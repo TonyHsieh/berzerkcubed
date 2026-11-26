@@ -25,9 +25,14 @@ export interface InputState {
   moveY: number; // -1..1 raw input
   mouseScreenX: number;
   mouseScreenY: number;
+  aimX: number; // -1..1 analog twin-stick aim (gamepad right stick); 0 = use mouse
+  aimY: number;
   firing: boolean;
   dodgePressed: boolean;
-  swivelDir: -1 | 0 | 1; // Q/E manual camera swivel
+  swapPressed: boolean; // F / gamepad X: equip or swap a nearby dropped weapon
+  slotSelect: number; // -1 = none, 0..2 = directly select weapon slot (1/2/3)
+  slotCycle: -1 | 0 | 1; // -1 previous / +1 next (LB/RB or mouse wheel)
+  swivelDir: -1 | 0 | 1; // Q/E or gamepad D-pad camera swivel
 }
 
 export interface CameraState {
@@ -117,7 +122,10 @@ export interface PlayerState {
   lastSafeY: number;
   recoil: number;
   muzzleFlash: number;
-  weapon: ActiveWeaponState;
+  weapon: ActiveWeaponState; // active weapon; mirrors weaponSlots[activeSlot]
+  /** Milestone 4: 3-slot physical weapon inventory (null = empty slot). */
+  weaponSlots?: Array<ActiveWeaponState | null>;
+  activeSlot?: number;
   orbitals: OrbitalState[];
 }
 

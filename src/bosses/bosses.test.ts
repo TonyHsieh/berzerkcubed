@@ -85,6 +85,33 @@ function makeIsland(overrides: Partial<PlatformIsland> = {}): PlatformIsland {
   };
 }
 
+function makeTestProjectile(
+  id: string,
+  x: number,
+  y: number,
+  overrides: Partial<Projectile> = {},
+): Projectile {
+  return {
+    id,
+    owner: 'player',
+    kind: 'bolt',
+    x,
+    y,
+    z: 10,
+    vx: -200,
+    vy: 0,
+    vz: 0,
+    radius: 6,
+    damage: 20,
+    life: 2,
+    maxLife: 2,
+    bouncesLeft: 0,
+    modifiers: [],
+    color: '#00f0ff',
+    ...overrides,
+  };
+}
+
 describe('Maximilian (Whirling Blades Boss)', () => {
   it('cycles through stalk -> charge -> whirlwind -> recover -> stalk', () => {
     const boss = createMaximilian(200, 400);
@@ -179,6 +206,67 @@ describe('Maximilian (Whirling Blades Boss)', () => {
     rollingPlayer.dodgeTimer = 0;
     updateMaximilian(boss, rollingPlayer, island, [], 0.05, events);
     expect(rollingPlayer.shield).toBeLessThan(100);
+  });
+
+  it('only blocks frontal projectiles while stalking, leaving flanks and rear exposed', () => {
+    // Player is east of the boss, so Maximilian faces east (angle 90°).
+    const boss = createMaximilian(400, 400);
+    const player = makePlayer(600, 400);
+    const island = makeIsland({ crates: [] });
+    const events: GameEvent[] = [];
+
+    const frontal = makeTestProjectile('front', 440, 400);
+    const rear = makeTestProjectile('rear', 360, 400);
+    const flank = makeTestProjectile('flank', 400, 360);
+
+    updateMaximilian(boss, player, island, [frontal, rear, flank], 0.05, events);
+
+    expect(boss.angle).toBe(90);
+    expect(frontal.life).toBe(0); // frontal bolt shredded
+    expect(rear.life).toBe(2); // rear bolt reaches the core
+    expect(flank.life).toBe(2); // flank bolt reaches the core
+  });
+
+  it('is fully vulnerable from every angle during the recover phase', () => {
+    const boss = createMaximilian(400, 400);
+    boss.phase = 'recover';
+    boss.phaseTimer = 1;
+    boss.bladeRadius = 34;
+    const player = makePlayer(600, 400);
+    const island = makeIsland({ crates: [] });
+    const events: GameEvent[] = [];
+
+    const bolts = [
+      makeTestProjectile('front', 430, 400),
+      makeTestProjectile('rear', 370, 400),
+      makeTestProjectile('flank', 400, 370),
+    ];
+    updateMaximilian(boss, player, island, bolts, 0.05, events);
+
+    expect(bolts.every((b) => b.life > 0)).toBe(true);
+    expect(boss.bladeRadius).toBeLessThan(58);
+  });
+
+  it('lets beams, lightning, grenades and pierce rounds punch through the whirlwind', () => {
+    const boss = createMaximilian(400, 400);
+    boss.phase = 'whirlwind';
+    boss.phaseTimer = 1;
+    boss.bladeRadius = 70;
+    const player = makePlayer(600, 400);
+    const island = makeIsland({ crates: [] });
+    const events: GameEvent[] = [];
+
+    const bolts = [
+      makeTestProjectile('bolt', 450, 400),
+      makeTestProjectile('beam', 450, 400, { kind: 'beam_segment' }),
+      makeTestProjectile('lightning', 450, 400, { kind: 'lightning' }),
+      makeTestProjectile('grenade', 450, 400, { kind: 'grenade' }),
+      makeTestProjectile('pierce', 450, 400, { modifiers: ['pierce'] }),
+    ];
+    updateMaximilian(boss, player, island, bolts, 0.05, events);
+
+    expect(bolts[0].life).toBe(0); // standard bolt still shredded
+    expect(bolts.slice(1).every((b) => b.life > 0)).toBe(true);
   });
 });
 

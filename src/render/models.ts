@@ -99,55 +99,100 @@ export function buildHeroModel(): HeroModel {
 
 // ---------------- Enemies ----------------
 
-/** Cubic Tron Enforcer: black voxel body, red neon trim. 4 layers × 3 frames. */
+/** Humanoid Tron Enforcer: separated legs/stride, armored torso, crimson visor.
+ *  5 layers × 3 gait frames, still baked into a single drawImage per enemy. */
 export function buildEnforcerFrames(): Slice[][] {
-  const swing = [0, 2, 0, -2]; // frames 0..3; callers may use first 2–4
-  return [0, 1, 2].map((f) => {
-    const sw = swing[f];
-    return layers(4, (ctx, cx, cy, z) => {
-      if (z === 0) {
-        rect(ctx, '#0b0b10', cx - 5, cy - 2 + sw, 4, 5);
-        rect(ctx, '#0b0b10', cx + 1, cy - 2 - sw, 4, 5);
-        rect(ctx, '#ef4444', cx - 5, cy + 2 + sw, 4, 1);
-        rect(ctx, '#ef4444', cx + 1, cy + 2 - sw, 4, 1);
-      } else if (z <= 2) {
-        rect(ctx, '#111118', cx - 6, cy - 5, 12, 10);
-        rect(ctx, '#dc2626', cx - 6, cy - 5, 12, 1); // outline
-        rect(ctx, '#dc2626', cx - 6, cy + 4, 12, 1);
-        if (z === 1) rect(ctx, '#ef4444', cx - 1, cy - 3, 2, 6); // chest core
+  const swing = [0, 3, -3]; // 3 distinct gait frames
+  return swing.map((sw) =>
+    layers(5, (ctx, cx, cy, z) => {
+      const chassis = '#0b0b10';
+      const plate = '#181820';
+      const neon = '#dc2626';
+      const hot = '#ff2a2a';
+
+      if (z <= 1) {
+        // Distinct legs with opposing stride and glowing boots.
+        rect(ctx, chassis, cx - 5 + sw, cy - 2, 4, 7);
+        rect(ctx, chassis, cx + 1 - sw, cy - 2, 4, 7);
+        rect(ctx, neon, cx - 5 + sw, cy + 4, 4, 1);
+        rect(ctx, neon, cx + 1 - sw, cy + 4, 4, 1);
+        if (z === 1) {
+          rect(ctx, plate, cx - 5 + sw, cy - 1, 4, 3);
+          rect(ctx, plate, cx + 1 - sw, cy - 1, 4, 3);
+        }
+      } else if (z <= 3) {
+        // Armored torso, pauldrons and swinging arms.
+        rect(ctx, chassis, cx - 6, cy - 6, 12, 9);
+        rect(ctx, plate, cx - 8, cy - 6, 3, 5);
+        rect(ctx, plate, cx + 5, cy - 6, 3, 5);
+        rect(ctx, neon, cx - 8, cy - 7, 3, 1);
+        rect(ctx, neon, cx + 5, cy - 7, 3, 1);
+        rect(ctx, chassis, cx - 8, cy - 1 + sw, 2, 6);
+        rect(ctx, chassis, cx + 6, cy - 1 - sw, 2, 6);
+        rect(ctx, hot, cx - 8, cy + 4 + sw, 2, 1);
+        rect(ctx, hot, cx + 6, cy + 4 - sw, 2, 1);
+        if (z === 2) {
+          rect(ctx, hot, cx - 2, cy - 4, 4, 4); // reactor core
+        } else {
+          rect(ctx, '#7f1d1d', cx - 5, cy - 5, 10, 1);
+        }
       } else {
-        rect(ctx, '#0b0b10', cx - 4, cy - 4, 8, 8);
-        rect(ctx, '#ff2a2a', cx - 3, cy - 5, 6, 2); // visor
+        // Head with a wide crimson visor and antenna.
+        rect(ctx, chassis, cx - 4, cy - 4, 8, 7);
+        rect(ctx, hot, cx - 3, cy - 5, 6, 2);
+        rect(ctx, neon, cx - 1, cy - 7, 2, 2);
+      }
+    }),
+  );
+}
+
+/** Humanoid ranged variant: same silhouette family, slimmer legs + rifle. */
+export function buildLaserShooterFrames(): Slice[][] {
+  return [0, 1].map((f) => {
+    const step = f === 0 ? 2 : -2;
+    return layers(5, (ctx, cx, cy, z) => {
+      if (z <= 1) {
+        rect(ctx, '#0b0b10', cx - 4 + step, cy - 1, 3, 7);
+        rect(ctx, '#0b0b10', cx + 1 - step, cy - 1, 3, 7);
+        rect(ctx, '#f43f5e', cx - 4 + step, cy + 5, 3, 1);
+        rect(ctx, '#f43f5e', cx + 1 - step, cy + 5, 3, 1);
+      } else if (z <= 3) {
+        rect(ctx, '#111118', cx - 6, cy - 6, 12, 9);
+        rect(ctx, '#b91c1c', cx - 8, cy - 6, 3, 4);
+        rect(ctx, '#b91c1c', cx + 5, cy - 6, 3, 4);
+        rect(ctx, '#ff3b3b', cx - 1, cy - 4, 2, 4);
+        rect(ctx, '#111118', cx - 8, cy - 1 + step, 2, 5);
+        rect(ctx, '#111118', cx + 6, cy - 1 - step, 2, 5);
+      } else {
+        rect(ctx, '#0b0b10', cx - 4, cy - 4, 8, 7);
+        rect(ctx, '#ff3b3b', cx - 3, cy - 5, 6, 2);
+        rect(ctx, '#ff3b3b', cx - 1, cy - 11, 2, 8); // rifle barrel
       }
     });
   });
 }
 
-export function buildLaserShooterFrames(): Slice[][] {
-  return [0, 1].map((f) =>
-    layers(4, (ctx, cx, cy, z) => {
-      if (z <= 1) rect(ctx, '#0b0b10', cx - 4, cy - 3 + f, 8, 7);
-      else rect(ctx, '#18181f', cx - 5, cy - 4, 10, 8);
-      rect(ctx, '#b91c1c', cx - 5, cy - 4, 10, 1);
-      if (z === 2) rect(ctx, '#ff3b3b', cx - 1, cy - 12, 2, 9); // rifle
-      if (z === 3) rect(ctx, '#ff3b3b', cx - 2, cy - 5, 4, 2); // lens
-    }),
-  );
-}
-
+/** Heavier humanoid grenadier with a shoulder launcher tube. */
 export function buildGrenadierFrames(): Slice[][] {
-  return [0, 1].map((f) =>
-    layers(5, (ctx, cx, cy, z) => {
-      const w = z >= 3 ? 14 : 12;
-      rect(ctx, '#101016', cx - w / 2, cy - 5 + f, w, 10);
-      rect(ctx, '#f97316', cx - w / 2, cy - 5 + f, w, 1);
-      if (z === 2) {
-        rect(ctx, '#292524', cx - 3, cy - 9, 6, 6); // launcher tube
-        rect(ctx, '#fb923c', cx - 2, cy - 10, 4, 1);
+  return [0, 1].map((f) => {
+    const step = f === 0 ? 3 : -3;
+    return layers(6, (ctx, cx, cy, z) => {
+      if (z <= 1) {
+        rect(ctx, '#101016', cx - 5 + step, cy - 1, 4, 7);
+        rect(ctx, '#101016', cx + 1 - step, cy - 1, 4, 7);
+        rect(ctx, '#fb923c', cx - 5 + step, cy + 5, 4, 1);
+        rect(ctx, '#fb923c', cx + 1 - step, cy + 5, 4, 1);
+      } else if (z <= 4) {
+        rect(ctx, '#101016', cx - 7, cy - 6, 14, 10);
+        rect(ctx, '#f97316', cx - 7, cy - 7, 14, 1);
+        rect(ctx, '#292524', cx - 3, cy - 10, 6, 5); // launcher tube
+        rect(ctx, '#fb923c', cx - 2, cy - 11, 4, 1);
+      } else {
+        rect(ctx, '#0b0b10', cx - 4, cy - 4, 8, 7);
+        rect(ctx, '#fb923c', cx - 3, cy - 5, 6, 2);
       }
-      if (z === 4) rect(ctx, '#fb923c', cx - 3, cy - 4, 6, 2);
-    }),
-  );
+    });
+  });
 }
 
 // ---------------- Bosses ----------------
@@ -285,6 +330,40 @@ export function buildAllModels(): ModelSet {
 /** Cache key for an enemy kind + animation frame (e.g. "enforcer_melee#1"). */
 export const enemyCacheKey = (kind: string, frame: number): string => `${kind}#${frame}`;
 
+export interface BakeTask {
+  label: string;
+  run: () => void;
+}
+
+/**
+ * Frame-yieldable bake steps. The loading screen runs these one at a time with
+ * requestAnimationFrame yields; bakeSwarmCaches runs the same list eagerly.
+ */
+export function getBakeTasks(
+  cache: SpriteStackCache,
+  models: ModelSet,
+  scale: number,
+  spacingPx: number,
+): BakeTask[] {
+  const tasks: BakeTask[] = [];
+  const bakeFrames = (kind: string, frames: Slice[][]) =>
+    frames.forEach((frame, i) => {
+      tasks.push({
+        label: `BAKING 24-ANGLE ${kind.toUpperCase()} CACHE ${i + 1}/${frames.length}`,
+        run: () => cache.bake(enemyCacheKey(kind, i), frame, scale, spacingPx),
+      });
+    });
+
+  bakeFrames('enforcer_melee', models.enforcer);
+  bakeFrames('laser_shooter', models.laserShooter);
+  bakeFrames('grenadier', models.grenadier);
+  tasks.push({
+    label: 'BAKING DESTRUCTIBLE CRATE CACHE',
+    run: () => cache.bake('crate', models.crate, scale, spacingPx),
+  });
+  return tasks;
+}
+
 /** Pre-bake the swarm enemies and crates (24 angles × frames) at startup. */
 export function bakeSwarmCaches(
   cache: SpriteStackCache,
@@ -292,10 +371,7 @@ export function bakeSwarmCaches(
   scale: number,
   spacingPx: number,
 ): void {
-  const bakeFrames = (kind: string, frames: Slice[][]) =>
-    frames.forEach((f, i) => cache.bake(enemyCacheKey(kind, i), f, scale, spacingPx));
-  bakeFrames('enforcer_melee', models.enforcer);
-  bakeFrames('laser_shooter', models.laserShooter);
-  bakeFrames('grenadier', models.grenadier);
-  cache.bake('crate', models.crate, scale, spacingPx);
+  for (const task of getBakeTasks(cache, models, scale, spacingPx)) {
+    task.run();
+  }
 }

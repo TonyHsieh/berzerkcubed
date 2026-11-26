@@ -87,3 +87,29 @@ Every agent appends a short entry here when completing a milestone, feature, or 
 - **Verifier follow-up (`t_47f758eb`, per human decision 2026-11-25)**:
   - Recorded the three Milestone 3 design defaults (Otto timer after boss defeat, manual `NEXT SECTOR` button, Sector 3+ alternating bosses +25% HP) as human-approved `[RESOLVED]` entries in `docs/QUESTIONS.md`.
   - Restored `approach_b_demo_modular_sprite_stacked_humanoid.html` to the repo root (it had been moved to `docs/` without a log entry, breaking links in `AGENTS.md` and `plan.md`). Content is byte-identical to `HEAD`.
+
+---
+
+## Milestone 4 — Visual Polish & Playtest Fixes (`t_1b9985b0`, `main`)
+- **Files created**:
+  - `src/engine/input.test.ts` — 4 headless Vitest tests for gamepad deadzone, standard button mapping and twin-stick hero aiming.
+  - `src/game/loading.ts` — `LOAD_STAGES`, `bootstrapAssets(onProgress)`, `createLoadingScreen()`: frame-yielded chunked model build + 24-angle cache baking behind a neon progress thermometer; headless no-op screen.
+  - `src/game/loading.test.ts` — 1 Vitest test proving monotonic progress, named stages and all 8×24 angle bakes.
+- **Files modified**:
+  - `src/engine/types.ts` — `InputState` gained `aimX`/`aimY`, `swapPressed`, `slotSelect`, `slotCycle`; `PlayerState` gained optional `weaponSlots` (3 slots, `null` = empty) and `activeSlot`.
+  - `src/engine/input.ts` — exported `GamepadLike`, `GamepadSnapshot`, `GAMEPAD_DEADZONE` (0.18) and pure `parseGamepadSnapshot(pad, deadzone)`; `createInputController` now polls `navigator.getGamepads()`, merges twin-stick movement/aim with WASD+mouse, maps A/LT=dodge, X=swap, LB/RB=cycle, RT/right-stick=fire, D-pad=swivel; `1`/`2`/`3` select slots, `F` swaps, mouse wheel cycles.
+  - `src/entities/player.ts` — `createPlayer` seeds `[weapon, null, null]` slots; `updatePlayer` aims from the analog right stick when deflected.
+  - `src/entities/weapons.ts` — `WEAPON_SLOT_COUNT`, `WEAPON_PICKUP_LABELS`, `weaponPickupLabel`, `pickupLabel`, `ensureWeaponSlots`, `getActiveSlot`, `selectWeaponSlot`, `cycleWeaponSlot`, `applyWeaponPickupToSlots`, `createDroppedWeaponPickup`.
+  - `src/entities/weapons.test.ts` — 3 new tests for slots/1-2-3/cycling, upgrade/equip/swap outcomes and pickup labels.
+  - `src/game/gameState.ts` — `GameState.nearbyWeaponPickup` + `toast`; slot selection applied per tick; weapon pickups no longer auto-collect (must press `F`), F swaps a full inventory and drops the replaced weapon on the floor; modifiers/orbitals/boosts still auto-collect and raise a toast.
+  - `src/game/gameState.test.ts` — updated the pickup flow test for F-to-equip, added a full F-swap/drop integration test.
+  - `src/game/hud.ts` — HUD shows 3 weapon slots (active highlighted), `[F] EQUIP/UPGRADE/SWAP` prompt, control hints and a center-bottom pickup toast.
+  - `src/game/renderer.ts` — depth-sorted extruded 3D walls (`drawWall3D`) with animated electrified plasma arcs and top rims, 3D sliding-door panels, distinct per-type pickup icons with hovering labels and `[F]` prompts, pulsing exposed Maximilian core in `recover`, `RendererOptions` accepts pre-baked `models`/`cache`.
+  - `src/render/models.ts` — humanoid Tron Enforcer / Laser Shooter / Grenadier stacks (separate legs and stride, armored shoulders/torso, crimson visor), still 24-angle cached; exported `BakeTask`/`getBakeTasks` shared by sync and async bake paths.
+  - `src/bosses/maximilian.ts` — bugfix: `projectileBypassesBlades`, `inFrontalBladeArc`; stalk/charge only block the frontal ±75° arc, whirlwind lets beam/lightning/grenade/pierce through, recover fully exposes the core with retracted blades.
+  - `src/bosses/bosses.test.ts` — 3 new tests for flank/rear shots, recover vulnerability and whirlwind bypasses.
+  - `src/main.ts` — boots through `createLoadingScreen()` + `bootstrapAssets()`, then creates the renderer from the pre-baked assets and starts the fixed-timestep loop.
+  - `docs/SHARED_CONTRACTS.md`, `docs/QUESTIONS.md` — new contracts and recorded design defaults.
+- **Verification & Regression Proof** (Nix devShell, `nix develop --impure --command sh -c 'pnpm run build && pnpm test'`):
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 995 modules transformed).
+  - `pnpm test` (`vitest run`): **PASSED** — **13 test files, 73/73 tests** (61 prior + 12 new: +3 Maximilian, +4 gamepad, +4 weapon slots, +1 loading).

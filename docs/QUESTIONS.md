@@ -61,3 +61,12 @@ If your worktree needs a new field in `src/engine/types.ts`, a new `GameEvent` v
   2. A different rotation or scaling curve.
 - **Escalation Channel**: Kanban `t_47f758eb` (human comment 2026-11-25)
 - **Human Decision**: APPROVED — Option 1. Sector 3+ alternates bosses with +25% HP per sector.
+
+## [RECORDED DEFAULT] Milestone 4 — Modifier carry-over when equipping/swapping weapons
+- **From**: `orchestrator` (Milestone 4 implementation, `t_1b9985b0`)
+- **Gap in Spec**: Milestone 4 adds a 3-slot weapon inventory and `[F]` equip/swap, while modifiers (`freeze`, `lightning_chain`, `pierce`, `ricochet`) remain walk-over auto-collect. The spec did not state whether collected modifiers stay with the weapon they were picked up on or follow the hero across slots.
+- **Options & Tradeoffs**:
+  1. Newly equipped/swapped weapons inherit the modifiers of the previously active weapon (implemented) — collected modifiers remain useful; `applyWeaponPickupToSlots` copies the active weapon's modifier list into the new slot.
+  2. Modifiers stay strictly bound to the weapon that was active when collected — switching slots can silently drop an earned modifier.
+  3. Store modifiers globally on `PlayerState` — cleanest long-term model but requires touching every fire/weapon consumer.
+- **Decision**: Option 1 recorded as the implemented default for this milestone; flagged for human review rather than guessed silently. No user-facing UX change.

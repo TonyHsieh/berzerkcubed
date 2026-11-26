@@ -33,6 +33,14 @@ import {
   isPlayerInvulnerable,
   updatePlayer,
 } from '../entities/player';
+import {
+  applyWeaponPickupToSlots,
+  createDroppedWeaponPickup,
+  cycleWeaponSlot,
+  pickupLabel,
+  selectWeaponSlot,
+  weaponPickupLabel,
+} from '../entities/weapons';
 import { damageCrate } from '../world/crate';
 import { createSectorIsland } from '../world/levelData';
 import {
@@ -61,6 +69,10 @@ export interface GameState {
   enemyProjectiles: Projectile[];
   bossProjectiles: Projectile[];
   pickups: PowerUpPickup[];
+  /** Closest weapon pickup within F range (drives the [F] EQUIP/SWAP prompt). */
+  nearbyWeaponPickup: PowerUpPickup | null;
+  /** Short-lived HUD toast for pickups / weapon swaps. */
+  toast: { text: string; life: number } | null;
   boss: BossState | null;
   camera: CameraState;
   grid: SpatialGrid<EnemyState>;
@@ -120,6 +132,8 @@ export function createGameStateForSector(
     enemyProjectiles: [],
     bossProjectiles: [],
     pickups: [],
+    nearbyWeaponPickup: null,
+    toast: null,
     boss: null,
     camera,
     grid: new SpatialGrid<EnemyState>(96),
@@ -630,6 +644,15 @@ export function stepGameState(
   state.elapsedTime += clampedDt;
   state.sectorTime += clampedDt;
 
+  if (state.toast) {
+    state.toast.life -= clampedDt;
+    if (state.toast.life <= 0) state.toast = null;
+  }
+
+  // Milestone 4: 1/2/3 direct-select and LB/RB / mouse-wheel slot cycling.
+  if (input.slotSelect >= 0) selectWeaponSlot(state.player, input.slotSelect);
+  if (input.slotCycle !== 0) cycleWeaponSlot(state.player, input.slotCycle);
+
   // 1. World simulation (sliding doors, temporary bridges, crate hitFlash decay)
   updateWorld(state.island, state.elapsedTime, clampedDt);
 
@@ -886,8 +909,11 @@ export function stepGameState(
   }
   state.enemies.length = writeIdx;
 
-  // 14. Update & collect power-up pickups
+  // 14. Pickups: modifiers/orbitals/boosts auto-collect; weapon drops need [F].
   let pWrite = 0;
+  let nearestWeapon: PowerUpPickup | null = null;
+  let nearestWeaponDistSq = Infinity;
+  const collectDist = state.player.radius + PICKUP_COLLECT_RADIUS;
   for (let i = 0; i < state.pickups.length; i++) {
     const pickup = state.pickups[i];
     pickup.life -= clampedDt;
@@ -895,10 +921,23 @@ export function stepGameState(
 
     const dx = state.player.x - pickup.x;
     const dy = state.player.y - pickup.y;
-    const collectDist = state.player.radius + PICKUP_COLLECT_RADIUS;
-    if (dx * dx + dy * dy <= collectDist * collectDist) {
+    const distSq = dx * dx + dy * dy;
+    const inRange = distSq <= collectDist * collectDist;
+
+    if (pickup.kind === 'weapon') {
+      // Dropped weapons stay on the floor until the hero equips them with F.
+      if (inRange && distSq < nearestWeaponDistSq) {
+        nearestWeapon = pickup;
+        nearestWeaponDistSq = distSq;
+      }
+      state.pickups[pWrite++] = pickup;
+      continue;
+    }
+
+    if (inRange) {
       applyPowerUp(state.player, pickup);
       state.score += 50;
+      state.toast = { text: `${pickupLabel(pickup)} ACQUIRED`, life: 1.6 };
       state.events.push({
         type: 'sfx',
         sound: 'door_hum',
@@ -911,6 +950,43 @@ export function stepGameState(
     state.pickups[pWrite++] = pickup;
   }
   state.pickups.length = pWrite;
+  state.nearbyWeaponPickup = nearestWeapon;
+
+  // 14b. [F] near a dropped weapon: level up, equip, or swap the active slot.
+  const swapWeaponType = state.nearbyWeaponPickup?.weaponType;
+  if (input.swapPressed && swapWeaponType) {
+    const drop = state.nearbyWeaponPickup!;
+    const outcome = applyWeaponPickupToSlots(state.player, swapWeaponType);
+    drop.life = 0;
+    state.nearbyWeaponPickup = null;
+    state.score += 50;
+    state.toast = {
+      text:
+        outcome.result === 'upgrade'
+          ? `${pickupLabel(drop)} LEVELED`
+          : outcome.result === 'equip'
+            ? `${pickupLabel(drop)} EQUIPPED`
+            : `${pickupLabel(drop)} EQUIPPED · ${weaponPickupLabel(outcome.replaced ?? 'pulse_rifle')} DROPPED`,
+      life: 2.2,
+    };
+    state.events.push({
+      type: 'sfx',
+      sound: 'door_hum',
+      x: state.player.x,
+      y: state.player.y,
+    });
+    if (outcome.replaced) {
+      state.pickups.push(
+        createDroppedWeaponPickup(
+          state.player.x + 22,
+          state.player.y,
+          outcome.replaced,
+        ),
+      );
+    }
+    // The consumed drop disappears immediately, not on the next tick.
+    state.pickups = state.pickups.filter((p) => p.life > 0);
+  }
 
   // 15. Prune expired projectiles
   state.playerProjectiles = state.playerProjectiles.filter((p) => p.life > 0);

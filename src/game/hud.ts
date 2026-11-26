@@ -1,4 +1,5 @@
 import type { BossKind } from '../engine/types';
+import { pickupLabel } from '../entities/weapons';
 import type { GameState } from './gameState';
 
 export interface HudCallbacks {
@@ -123,8 +124,18 @@ export function createHud(
     <div style="font-size:12px;font-weight:bold;color:#38bdf8;" id="hud-weapon-name">PULSE RIFLE LV.1</div>
     <div style="font-size:10px;color:#a78bfa;margin-top:4px;" id="hud-weapon-mods">MODS: NONE</div>
     <div style="font-size:10px;color:#22d3ee;margin-top:2px;" id="hud-orbitals">ORBITALS: 0</div>
+    <div style="display:flex;gap:4px;margin-top:6px;" id="hud-weapon-slots"></div>
+    <div style="font-size:10px;color:#94a3b8;margin-top:4px;">SLOTS [1/2/3 / WHEEL] · SWAP [F]</div>
+    <div style="font-size:11px;color:#facc15;margin-top:6px;display:none;" id="hud-swap-prompt"></div>
   `;
   container.appendChild(weaponBox);
+
+  // Center-bottom pickup / swap toast
+  const toastBox = document.createElement('div');
+  toastBox.style.cssText =
+    'position:absolute;bottom:132px;left:50%;transform:translateX(-50%);background:rgba(5,7,13,0.85);border:1px solid #facc15;padding:6px 14px;display:none;box-shadow:0 0 16px rgba(250,204,21,0.3);';
+  toastBox.innerHTML = '<span id="hud-toast-text" style="font-size:13px;color:#facc15;letter-spacing:1px;"></span>';
+  container.appendChild(toastBox);
 
   // Collapsible Designer Tuning Panel
   const tuningPanel = document.createElement('div');
@@ -191,6 +202,10 @@ export function createHud(
   const weaponNameEl = $<HTMLDivElement>('hud-weapon-name');
   const weaponModsEl = $<HTMLDivElement>('hud-weapon-mods');
   const orbitalsEl = $<HTMLDivElement>('hud-orbitals');
+  const weaponSlotsEl = $<HTMLDivElement>('hud-weapon-slots');
+  const swapPromptEl = $<HTMLDivElement>('hud-swap-prompt');
+  const toastContainer = $<HTMLDivElement>('hud-toast-text').parentElement as HTMLDivElement;
+  const toastTextEl = $<HTMLSpanElement>('hud-toast-text');
   const meleeSlider = $<HTMLInputElement>('tune-melee');
   const meleeValEl = $<HTMLSpanElement>('tune-melee-val');
   const rangedSlider = $<HTMLInputElement>('tune-ranged');
@@ -277,6 +292,36 @@ export function createHud(
           ? `MODS: ${p.weapon.modifiers.map(formatWeaponName).join(' + ')}`
           : 'MODS: NONE';
       orbitalsEl.textContent = `ORBITALS: ${p.orbitals.length}`;
+
+      // 3-slot physical weapon inventory + [F] swap prompt
+      const slots = p.weaponSlots ?? [p.weapon, null, null];
+      const activeSlot = p.activeSlot ?? 0;
+      weaponSlotsEl.innerHTML = slots
+        .map((slot, i) => {
+          const isActive = i === activeSlot;
+          const color = isActive ? '#facc15' : slot ? '#38bdf8' : '#475569';
+          const name = slot ? formatWeaponName(slot.primary) : 'EMPTY';
+          return `<span style="color:${color};border:1px solid ${color};padding:2px 5px;font-size:9px;">${i + 1}:${name}</span>`;
+        })
+        .join('');
+
+      const near = state.nearbyWeaponPickup;
+      if (near) {
+        const alreadyCarried = slots.some((s) => s?.primary === near.weaponType);
+        const full = slots.every((s) => s !== null);
+        const verb = alreadyCarried ? 'UPGRADE' : full ? 'SWAP' : 'EQUIP';
+        swapPromptEl.textContent = `[F] ${verb} ${pickupLabel(near)}`;
+        swapPromptEl.style.display = 'block';
+      } else {
+        swapPromptEl.style.display = 'none';
+      }
+
+      if (state.toast) {
+        toastTextEl.textContent = state.toast.text;
+        toastContainer.style.display = 'block';
+      } else {
+        toastContainer.style.display = 'none';
+      }
 
       sectorEl.textContent = `SECTOR ${state.sectorIndex + 1}`;
       scoreEl.textContent = String(state.score);

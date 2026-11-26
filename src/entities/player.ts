@@ -39,6 +39,7 @@ export function createPlayer(
   y: number,
   config: DifficultyConfig,
 ): PlayerState {
+  const weapon = createStarterWeapon();
   return {
     x,
     y,
@@ -64,7 +65,9 @@ export function createPlayer(
     lastSafeY: y,
     recoil: 0,
     muzzleFlash: 0,
-    weapon: createStarterWeapon(),
+    weapon,
+    weaponSlots: [weapon, null, null],
+    activeSlot: 0,
     orbitals: [],
   };
 }
@@ -275,8 +278,14 @@ export function updatePlayer(
   player.x += player.vx * dt;
   player.y += player.vy * dt;
 
-  // 6. Independent 360° aiming from mouse cursor
-  if (viewport || input.mouseScreenX !== 0 || input.mouseScreenY !== 0) {
+  // 6. Independent 360° aiming. The gamepad right stick takes priority when
+  //    deflected; otherwise the mouse cursor aims relative to the player.
+  if (input.aimX !== 0 || input.aimY !== 0) {
+    const stickAim = normalizeAngleDeg(
+      (Math.atan2(input.aimX, -input.aimY) * 180) / Math.PI,
+    );
+    player.aimAngle = normalizeAngleDeg(stickAim - camera.angleDeg);
+  } else if (viewport || input.mouseScreenX !== 0 || input.mouseScreenY !== 0) {
     const viewW = viewport?.width ?? 1280;
     const viewH = viewport?.height ?? 720;
     const playerScreen = worldToScreen(player.x, player.y, camera, viewW, viewH);

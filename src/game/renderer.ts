@@ -11,8 +11,10 @@ import type {
   PlayerState,
   PowerUpPickup,
   Projectile,
+  WallSegment,
 } from '../engine/types';
 import { getOrbitalWorldPos } from '../entities/orbitals';
+import { pickupLabel } from '../entities/weapons';
 import { CircuitBackground } from '../render/circuitBg';
 import {
   bakeSwarmCaches,
@@ -55,6 +57,9 @@ export interface RendererOptions {
   voice?: VoiceTauntEngine;
   vfx?: VfxSystem;
   circuitBg?: CircuitBackground;
+  /** Pre-built assets from the async loading screen (skips synchronous bake). */
+  models?: ModelSet;
+  cache?: SpriteStackCache;
 }
 
 function getCameraShakeOffset(camera: CameraState): { x: number; y: number } {
@@ -158,73 +163,44 @@ function renderIslandWorld(
     ctx.lineWidth = 1;
     ctx.strokeRect(d.x, d.y, d.w, d.h);
 
-    if (closedFrac > 0.02) {
-      ctx.fillStyle = open >= 0.75 ? 'rgba(34, 211, 238, 0.25)' : '#0f172a';
-      ctx.strokeStyle = open >= 0.75 ? '#22d3ee' : '#f59e0b';
+    const panelColor = open >= 0.75 ? 'rgba(34, 211, 238, 0.25)' : '#0f172a';
+    const panelEdge = open >= 0.75 ? '#22d3ee' : '#f59e0b';
+    const extrude = 7;
+    const drawDoorPanel = (px: number, py: number, pw: number, ph: number): void => {
+      // Extruded 3D sliding door block with a glowing top rim.
+      ctx.fillStyle = '#0b1220';
+      ctx.beginPath();
+      ctx.moveTo(px, py); ctx.lineTo(px - extrude, py - extrude);
+      ctx.lineTo(px - extrude, py + ph - extrude); ctx.lineTo(px, py + ph);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = panelColor;
+      ctx.fillRect(px, py, pw, ph);
+      ctx.strokeStyle = panelEdge;
       ctx.lineWidth = 2;
+      ctx.strokeRect(px, py, pw, ph);
+      ctx.fillStyle = open >= 0.75 ? 'rgba(34, 211, 238, 0.4)' : '#1e293b';
+      ctx.beginPath();
+      ctx.moveTo(px - extrude, py - extrude); ctx.lineTo(px + pw - extrude, py - extrude);
+      ctx.lineTo(px + pw, py); ctx.lineTo(px, py);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+    };
+
+    if (closedFrac > 0.02) {
       if (horiz) {
         const panelW = (d.w * 0.5) * closedFrac;
-        ctx.fillRect(d.x, d.y, panelW, d.h);
-        ctx.strokeRect(d.x, d.y, panelW, d.h);
-        ctx.fillRect(d.x + d.w - panelW, d.y, panelW, d.h);
-        ctx.strokeRect(d.x + d.w - panelW, d.y, panelW, d.h);
+        drawDoorPanel(d.x, d.y, panelW, d.h);
+        drawDoorPanel(d.x + d.w - panelW, d.y, panelW, d.h);
       } else {
         const panelH = (d.h * 0.5) * closedFrac;
-        ctx.fillRect(d.x, d.y, d.w, panelH);
-        ctx.strokeRect(d.x, d.y, d.w, panelH);
-        ctx.fillRect(d.x, d.y + d.h - panelH, d.w, panelH);
-        ctx.strokeRect(d.x, d.y + d.h - panelH, d.w, panelH);
+        drawDoorPanel(d.x, d.y, d.w, panelH);
+        drawDoorPanel(d.x, d.y + d.h - panelH, d.w, panelH);
       }
     }
   }
 
-  // 4. Walls (safe walls vs overtly animated electrified walls)
-  for (let i = 0; i < island.walls.length; i++) {
-    const w = island.walls[i];
-    if (w.electrified) {
-      const flicker = 0.65 + 0.35 * Math.sin(elapsedTime * 28 + i * 3.1);
-      ctx.save();
-      ctx.fillStyle = '#1b1124';
-      ctx.fillRect(w.x, w.y, w.w, w.h);
-      ctx.strokeStyle = flicker > 0.8 ? '#fef08a' : '#f43f5e';
-      ctx.lineWidth = 3;
-      ctx.shadowColor = '#f43f5e';
-      ctx.shadowBlur = 16;
-      ctx.strokeRect(w.x, w.y, w.w, w.h);
-
-      // Animated crackling lightning bolt along electrified wall centerline
-      ctx.strokeStyle = '#67e8f9';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      const vertical = w.h >= w.w;
-      const steps = 8;
-      if (vertical) {
-        const cx = w.x + w.w * 0.5;
-        ctx.moveTo(cx, w.y);
-        for (let s = 1; s < steps; s++) {
-          const jitter = Math.sin(elapsedTime * 45 + s * 7.3 + i) * (w.w * 0.35);
-          ctx.lineTo(cx + jitter, w.y + (w.h * s) / steps);
-        }
-        ctx.lineTo(cx, w.y + w.h);
-      } else {
-        const cy = w.y + w.h * 0.5;
-        ctx.moveTo(w.x, cy);
-        for (let s = 1; s < steps; s++) {
-          const jitter = Math.sin(elapsedTime * 45 + s * 7.3 + i) * (w.h * 0.35);
-          ctx.lineTo(w.x + (w.w * s) / steps, cy + jitter);
-        }
-        ctx.lineTo(w.x + w.w, cy);
-      }
-      ctx.stroke();
-      ctx.restore();
-    } else {
-      ctx.fillStyle = '#0d1526';
-      ctx.fillRect(w.x, w.y, w.w, w.h);
-      ctx.strokeStyle = outlineColor;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(w.x, w.y, w.w, w.h);
-    }
-  }
+  // 4. Walls are drawn in the depth-sorted renderQueue as extruded 3D blocks
+  //    (see drawWall3D) so they interleave correctly with the Hero, enemies and
+  //    projectiles instead of always sitting behind them.
 
   // 5. Recogniser sky-slam growing ground shadow telegraph
   if (
@@ -268,6 +244,94 @@ function renderIslandWorld(
       ctx.restore();
     }
   }
+}
+
+/**
+ * Extruded Approach-B wall block. Drawn in screen space (rotated by the camera)
+ * and enqueued in the depth-sorted queue so it Z-sorts against units and shots.
+ */
+function drawWall3D(
+  ctx: CanvasRenderingContext2D,
+  wall: WallSegment,
+  screenX: number,
+  screenY: number,
+  camAngleDeg: number,
+  zScale: number,
+  elapsedTime: number,
+  index: number,
+  outlineColor: string,
+): void {
+  const segW = wall.w;
+  const segD = wall.h;
+  const lift = Math.max(10, wall.heightZ * zScale);
+  const ex = -lift * 0.32; // fake-isometric lateral offset of the top face
+
+  ctx.save();
+  ctx.translate(screenX, screenY);
+  ctx.rotate((camAngleDeg * Math.PI) / 180);
+
+  const baseX = -segW / 2;
+  const baseY = -segD / 2;
+  const topX = baseX + ex;
+  const topY = baseY - lift;
+
+  // Left + right side faces (visible extruded depth).
+  ctx.fillStyle = wall.electrified ? '#2a0f1a' : '#0b1524';
+  ctx.beginPath();
+  ctx.moveTo(baseX, baseY); ctx.lineTo(topX, topY);
+  ctx.lineTo(topX, topY + segD); ctx.lineTo(baseX, baseY + segD);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(baseX + segW, baseY); ctx.lineTo(topX + segW, topY);
+  ctx.lineTo(topX + segW, topY + segD); ctx.lineTo(baseX + segW, baseY + segD);
+  ctx.closePath(); ctx.fill();
+
+  // Front face with neon outline.
+  ctx.fillStyle = wall.electrified ? '#1b1124' : '#0d1526';
+  ctx.fillRect(baseX, baseY, segW, segD);
+  ctx.strokeStyle = wall.electrified ? '#f43f5e' : outlineColor;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(baseX, baseY, segW, segD);
+
+  // Glowing top face + rim.
+  ctx.shadowColor = wall.electrified ? '#f43f5e' : outlineColor;
+  ctx.shadowBlur = 12;
+  ctx.fillStyle = wall.electrified ? '#3b1220' : '#12243d';
+  ctx.beginPath();
+  ctx.moveTo(topX, topY); ctx.lineTo(topX + segW, topY);
+  ctx.lineTo(topX + segW + ex, topY + segD); ctx.lineTo(topX + ex, topY + segD);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  if (wall.electrified) {
+    // Animated 3D vertical plasma arcs crawling along the extruded faces.
+    const flicker = 0.65 + 0.35 * Math.sin(elapsedTime * 28 + index * 3.1);
+    ctx.shadowColor = '#67e8f9';
+    ctx.shadowBlur = 16;
+    ctx.strokeStyle = flicker > 0.8 ? '#fef08a' : '#67e8f9';
+    ctx.lineWidth = 2;
+    const arcs = Math.max(1, Math.floor(segW / 16));
+    for (let a = 0; a < arcs; a++) {
+      const ax = baseX + ((a + 0.5) * segW) / arcs;
+      ctx.beginPath();
+      ctx.moveTo(ax, baseY + segD);
+      const steps = 6;
+      for (let s = 1; s < steps; s++) {
+        const jitter = Math.sin(elapsedTime * 42 + s * 6.7 + a + index) * 2.6;
+        ctx.lineTo(ax + jitter, baseY + (segD * s) / steps);
+      }
+      ctx.lineTo(ax + ex, topY);
+      ctx.stroke();
+      // Energy bar on the top rim
+      ctx.beginPath();
+      ctx.moveTo(ax + ex, topY + 1);
+      ctx.lineTo(ax + ex + 2, topY + 1);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.restore();
 }
 
 function drawHero(
@@ -445,6 +509,17 @@ function drawBoss(
     ctx.arc(screenX, screenY - zLift - 8, boss.bladeRadius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
+    // Pulsing exposed core telegraphs the fully-vulnerable recovery window.
+    if (boss.phase === 'recover') {
+      const pulse = 0.5 + 0.5 * Math.sin(elapsedTime * 16);
+      ctx.save();
+      ctx.strokeStyle = `rgba(255, 240, 120, ${(0.45 + pulse * 0.5).toFixed(2)})`;
+      ctx.lineWidth = 2 + pulse * 2;
+      ctx.beginPath();
+      ctx.arc(screenX, screenY - zLift - 14, 9 + pulse * 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
     return;
   }
 
@@ -573,6 +648,91 @@ function drawProjectile(
   ctx.restore();
 }
 
+/** Distinct, instantly recognizable icons per pickup kind (Milestone 4). */
+function drawPickupIcon(
+  ctx: CanvasRenderingContext2D,
+  pickup: PowerUpPickup,
+  color: string,
+): void {
+  const box = (x: number, y: number, w: number, h: number) => ctx.fillRect(x, y, w, h);
+  const line = (x1: number, y1: number, x2: number, y2: number) => {
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+  };
+  ctx.fillStyle = color;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.2;
+
+  if (pickup.kind === 'weapon') {
+    switch (pickup.weaponType) {
+      case 'spread':
+        line(-8, 6, -2, -6); line(0, 7, 0, -8); line(8, 6, 2, -6);
+        box(-2, 6, 4, 4);
+        break;
+      case 'machine_gun':
+        box(-3, -9, 2, 14); box(1, -9, 2, 14); box(-4, 5, 8, 4);
+        ctx.strokeRect(-5, -2, 10, 5);
+        break;
+      case 'shotgun':
+        box(-4, -9, 3, 14); box(1, -9, 3, 14); box(-4, 4, 8, 3);
+        break;
+      case 'beam':
+      case 'wide_beam':
+        box(-2, -8, 4, 16);
+        box(pickup.weaponType === 'wide_beam' ? -7 : -4, 4, pickup.weaponType === 'wide_beam' ? 14 : 8, 3);
+        break;
+      case 'flamethrower':
+        box(-3, -3, 6, 10);
+        ctx.beginPath(); ctx.moveTo(-2, -4); ctx.lineTo(0, -11); ctx.lineTo(2, -4); ctx.fill();
+        break;
+      case 'bouncing_lightning':
+        ctx.beginPath();
+        ctx.moveTo(2, -10); ctx.lineTo(-4, -1); ctx.lineTo(1, -1);
+        ctx.lineTo(-2, 10); ctx.lineTo(5, -1); ctx.lineTo(0, -1);
+        ctx.closePath(); ctx.fill();
+        break;
+      case 'grenade':
+        ctx.beginPath(); ctx.arc(0, 2, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        line(2, -4, 5, -8);
+        break;
+      case 'mine':
+        ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        for (let a = 0; a < 8; a++) {
+          const r = (a * Math.PI) / 4;
+          line(Math.cos(r) * 6, Math.sin(r) * 6, Math.cos(r) * 10, Math.sin(r) * 10);
+        }
+        break;
+      default: // pulse_rifle
+        box(-2, -10, 4, 15); box(-5, 4, 10, 4); box(-1, -13, 2, 3);
+        break;
+    }
+    return;
+  }
+
+  if (pickup.kind === 'modifier') {
+    ctx.beginPath();
+    ctx.moveTo(0, -9); ctx.lineTo(8, 0); ctx.lineTo(0, 9); ctx.lineTo(-8, 0);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    return;
+  }
+  if (pickup.kind === 'orbital') {
+    ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill();
+    return;
+  }
+  if (pickup.kind === 'shield_boost') {
+    ctx.beginPath();
+    ctx.moveTo(0, -9); ctx.lineTo(8, -5); ctx.lineTo(8, 3);
+    ctx.lineTo(0, 9); ctx.lineTo(-8, 3); ctx.lineTo(-8, -5);
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+    return;
+  }
+  // extra_life: plus / 1-UP
+  box(-2, -8, 4, 16); box(-8, -2, 16, 4);
+}
+
 function drawPickup(
   ctx: CanvasRenderingContext2D,
   pickup: PowerUpPickup,
@@ -580,6 +740,7 @@ function drawPickup(
   screenY: number,
   zScale: number,
   elapsedTime: number,
+  prompt?: string,
 ): void {
   const bob = Math.sin(elapsedTime * 5 + pickup.x * 0.1) * 4;
   const sy = screenY - (pickup.z + 6 + bob) * zScale;
@@ -595,22 +756,42 @@ function drawPickup(
             : '#facc15';
 
   ctx.save();
-  ctx.fillStyle = color;
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 1.5;
   ctx.shadowColor = color;
   ctx.shadowBlur = 14;
   ctx.translate(screenX, sy);
-  ctx.rotate(elapsedTime * 2.4);
-  ctx.fillRect(-7, -7, 14, 14);
-  ctx.strokeRect(-7, -7, 14, 14);
+  drawPickupIcon(ctx, pickup, color);
+
+  // Crisp hovering short label so players always know what they grabbed.
+  ctx.shadowBlur = 0;
+  ctx.font = 'bold 9px ui-monospace, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#05070d';
+  const label = pickupLabel(pickup);
+  const labelW = ctx.measureText(label).width;
+  ctx.fillRect(-labelW / 2 - 3, 14, labelW + 6, 12);
+  ctx.fillStyle = color;
+  ctx.fillText(label, 0, 23);
+
+  if (prompt) {
+    ctx.font = 'bold 10px ui-monospace, monospace';
+    const promptW = ctx.measureText(prompt).width;
+    ctx.fillStyle = '#05070d';
+    ctx.fillRect(-promptW / 2 - 4, -28, promptW + 8, 14);
+    ctx.fillStyle = '#facc15';
+    ctx.fillText(prompt, 0, -18);
+  }
   ctx.restore();
 }
 
 export function createRenderer(options: RendererOptions = {}): GameRenderer {
-  const cache = new SpriteStackCache();
-  const models = buildAllModels();
-  bakeSwarmCaches(cache, models, SPRITE_SCALE, BASE_LAYER_SPACING);
+  const models = options.models ?? buildAllModels();
+  const cache =
+    options.cache ??
+    (() => {
+      const baked = new SpriteStackCache();
+      bakeSwarmCaches(baked, models, SPRITE_SCALE, BASE_LAYER_SPACING);
+      return baked;
+    })();
 
   const circuitBg = options.circuitBg ?? new CircuitBackground();
   const vfx = options.vfx ?? new VfxSystem();
@@ -703,6 +884,28 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
 
       // 3. Build depth-sorted renderQueue by screen Y
       renderQueue.length = 0;
+
+      // True 3D extruded walls/doors interleave with units and projectiles.
+      const wallOutline = state.island.outline === 'red' ? '#ef4444' : '#22d3ee';
+      for (let i = 0; i < state.island.walls.length; i++) {
+        const wall = state.island.walls[i];
+        const s = project(wall.x + wall.w * 0.5, wall.y + wall.h * 0.5);
+        renderQueue.push({
+          sortY: s.y + wall.h * 0.5,
+          draw: (c) =>
+            drawWall3D(
+              c,
+              wall,
+              s.x,
+              s.y,
+              camAngle,
+              zScale,
+              state.elapsedTime,
+              i,
+              wallOutline,
+            ),
+        });
+      }
 
       // Crates
       for (let i = 0; i < state.island.crates.length; i++) {
@@ -823,13 +1026,21 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
         });
       }
 
-      // Pickups
+      // Pickups (distinct icons + hovering labels + [F] equip prompt)
       for (let i = 0; i < state.pickups.length; i++) {
         const pickup = state.pickups[i];
         const s = project(pickup.x, pickup.y);
+        let prompt: string | undefined;
+        const near = state.nearbyWeaponPickup;
+        if (near && near.id === pickup.id && near.weaponType) {
+          const slots = state.player.weaponSlots ?? [];
+          const carried = slots.some((slot) => slot?.primary === near.weaponType);
+          const full = slots.length > 0 && slots.every((slot) => slot !== null);
+          prompt = `[F] ${carried ? 'UPGRADE' : full ? 'SWAP' : 'EQUIP'}`;
+        }
         renderQueue.push({
           sortY: s.y,
-          draw: (c) => drawPickup(c, pickup, s.x, s.y, zScale, state.elapsedTime),
+          draw: (c) => drawPickup(c, pickup, s.x, s.y, zScale, state.elapsedTime, prompt),
         });
       }
 

@@ -4,6 +4,7 @@ import { createEnforcer } from '../enemies/enforcer';
 import { createGrenadier, createLaserShooter } from '../enemies/shooter';
 import { createDefaultInputState } from '../engine/input';
 import type { GameEvent, Projectile } from '../engine/types';
+import { applyWeaponPickupToSlots } from '../entities/weapons';
 import { createCrate } from '../world/crate';
 import {
   createGameState,
@@ -121,7 +122,8 @@ describe('Milestone 3 Integration — Full Headless Simulation Loop', () => {
     expect(state.pickups).toHaveLength(1);
 
     // Override dropped pickup to a deterministic weapon + add a duplicate & modifier pickup
-    // at the hero's collection spot to verify full pickup -> applyPowerUp -> level/combine flow
+    // at the hero's collection spot. Weapon drops now require F to equip/level;
+    // modifiers still auto-collect on walk-over.
     const dropped = state.pickups[0];
     dropped.kind = 'weapon';
     dropped.weaponType = 'spread';
@@ -149,7 +151,10 @@ describe('Milestone 3 Integration — Full Headless Simulation Loop', () => {
       },
     );
 
-    stepGameState(state, idleInput, FIXED_DT);
+    const equipInput = createDefaultInputState();
+    equipInput.swapPressed = true;
+    stepGameState(state, equipInput, FIXED_DT); // equip spread into an empty slot
+    stepGameState(state, equipInput, FIXED_DT); // duplicate spread -> level 2
 
     expect(state.pickups).toHaveLength(0);
     expect(state.player.weapon.primary).toBe('spread');
@@ -357,5 +362,45 @@ describe('Milestone 3 Integration — Full Headless Simulation Loop', () => {
     stepGameState(state, createDefaultInputState(), FIXED_DT);
     expect(state.player.shield).toBe(config.playerMaxShield - 35);
     expect(state.player.hp).toBe(config.playerMaxHp);
+  });
+
+  it('F near a dropped weapon swaps a full inventory and drops the old weapon on the floor', () => {
+    const config = createDifficultyConfig();
+    const state = createGameStateForSector(0, config);
+    const player = state.player;
+    player.invulnTimer = 100;
+
+    // Fill all three physical weapon slots.
+    applyWeaponPickupToSlots(player, 'spread');
+    applyWeaponPickupToSlots(player, 'machine_gun');
+    expect(player.weaponSlots?.every((slot) => slot !== null)).toBe(true);
+    const activeBefore = player.weapon.primary;
+
+    state.pickups.push({
+      id: 'f_drop',
+      x: player.x,
+      y: player.y,
+      z: 0,
+      kind: 'weapon',
+      weaponType: 'grenade',
+      life: 10,
+    });
+
+    stepGameState(state, createDefaultInputState(), FIXED_DT);
+    // Dropped weapons never auto-collect.
+    expect(state.nearbyWeaponPickup?.id).toBe('f_drop');
+    expect(player.weapon.primary).toBe(activeBefore);
+
+    const swapInput = createDefaultInputState();
+    swapInput.swapPressed = true;
+    stepGameState(state, swapInput, FIXED_DT);
+
+    expect(player.weapon.primary).toBe('grenade');
+    expect(state.toast?.text).toContain('DROPPED');
+    expect(
+      state.pickups.some(
+        (pickup) => pickup.kind === 'weapon' && pickup.weaponType === activeBefore,
+      ),
+    ).toBe(true);
   });
 });

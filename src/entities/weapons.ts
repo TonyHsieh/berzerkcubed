@@ -2,6 +2,7 @@ import type {
   ActiveWeaponState,
   GameEvent,
   PlayerState,
+  PowerUpPickup,
   Projectile,
   WeaponModifier,
   WeaponType,
@@ -192,6 +193,165 @@ export function applyModifierPickup(
   } else {
     weapon.level = Math.min(MAX_WEAPON_LEVEL, weapon.level + 1);
   }
+}
+
+// ---------------- Milestone 4: 3-slot weapon inventory & F-to-swap ----------------
+
+export const WEAPON_SLOT_COUNT = 3;
+
+export const WEAPON_PICKUP_LABELS: Record<WeaponType, string> = {
+  pulse_rifle: 'PULSE',
+  spread: 'SPREAD',
+  machine_gun: 'MGUN',
+  shotgun: 'SHOTGUN',
+  beam: 'BEAM',
+  wide_beam: 'WIDE BEAM',
+  flamethrower: 'FLAMER',
+  bouncing_lightning: 'TESLA',
+  grenade: 'GRENADE',
+  mine: 'MINE',
+};
+
+export function weaponPickupLabel(type: WeaponType): string {
+  return WEAPON_PICKUP_LABELS[type] ?? type.toUpperCase();
+}
+
+/** Short hovering label shown under a ground pickup. */
+export function pickupLabel(pickup: PowerUpPickup): string {
+  switch (pickup.kind) {
+    case 'weapon':
+      return pickup.weaponType ? weaponPickupLabel(pickup.weaponType) : 'WEAPON';
+    case 'modifier':
+      return pickup.modifier ? pickup.modifier.replace(/_/g, ' ').toUpperCase() : 'MOD';
+    case 'orbital':
+      return pickup.orbitalType ? pickup.orbitalType.replace(/_/g, ' ').toUpperCase() : 'ORBITAL';
+    case 'shield_boost':
+      return 'SHIELD';
+    case 'extra_life':
+      return '1-UP';
+  }
+}
+
+function makeWeapon(weaponType: WeaponType, level = 1): ActiveWeaponState {
+  const weapon = createStarterWeapon();
+  weapon.primary = weaponType;
+  weapon.level = Math.max(1, Math.min(MAX_WEAPON_LEVEL, level));
+  return weapon;
+}
+
+/** Lazily materialize exactly 3 slots for players created before Milestone 4. */
+export function ensureWeaponSlots(
+  player: PlayerState,
+): Array<ActiveWeaponState | null> {
+  if (!player.weaponSlots || player.weaponSlots.length !== WEAPON_SLOT_COUNT) {
+    player.weaponSlots = [player.weapon, null, null];
+    player.activeSlot = 0;
+    return player.weaponSlots;
+  }
+  const active = Math.max(0, Math.min(WEAPON_SLOT_COUNT - 1, player.activeSlot ?? 0));
+  player.activeSlot = active;
+  if (player.weaponSlots[active] !== player.weapon) {
+    player.weaponSlots[active] = player.weapon;
+  }
+  return player.weaponSlots;
+}
+
+/** Callers must ensure slots first; this only repoints the active weapon. */
+function setActiveSlot(player: PlayerState, index: number): void {
+  const slots = player.weaponSlots;
+  if (!slots) return;
+  const clamped = Math.max(0, Math.min(WEAPON_SLOT_COUNT - 1, index));
+  const weapon = slots[clamped];
+  if (!weapon) return;
+  player.activeSlot = clamped;
+  player.weapon = weapon;
+  player.weapon.fireCooldown = 0;
+}
+
+export function getActiveSlot(player: PlayerState): number {
+  ensureWeaponSlots(player);
+  return player.activeSlot ?? 0;
+}
+
+export function selectWeaponSlot(player: PlayerState, index: number): boolean {
+  const slots = ensureWeaponSlots(player);
+  if (index < 0 || index >= WEAPON_SLOT_COUNT || !slots[index]) return false;
+  setActiveSlot(player, index);
+  return true;
+}
+
+export function cycleWeaponSlot(player: PlayerState, direction: -1 | 0 | 1): boolean {
+  if (direction === 0) return false;
+  const slots = ensureWeaponSlots(player);
+  const current = getActiveSlot(player);
+  for (let step = 1; step <= WEAPON_SLOT_COUNT; step++) {
+    const idx =
+      (((current + direction * step) % WEAPON_SLOT_COUNT) + WEAPON_SLOT_COUNT) %
+      WEAPON_SLOT_COUNT;
+    if (slots[idx]) {
+      setActiveSlot(player, idx);
+      return true;
+    }
+  }
+  return false;
+}
+
+export interface WeaponSwapOutcome {
+  result: 'upgrade' | 'equip' | 'swap';
+  slotIndex: number;
+  replaced?: WeaponType;
+}
+
+/**
+ * `F` near a dropped weapon: level up a carried copy, equip into an empty slot,
+ * or swap with the active slot and hand back the replaced weapon for dropping.
+ */
+export function applyWeaponPickupToSlots(
+  player: PlayerState,
+  weaponType: WeaponType,
+): WeaponSwapOutcome {
+  const slots = ensureWeaponSlots(player);
+  // Modifiers collected on walk-over persist when equipping a new weapon.
+  const inheritedModifiers = [...player.weapon.modifiers];
+  const existing = slots.findIndex((s) => s?.primary === weaponType);
+  if (existing >= 0) {
+    applyWeaponPickup(slots[existing]!, weaponType);
+    setActiveSlot(player, existing);
+    return { result: 'upgrade', slotIndex: existing };
+  }
+  const empty = slots.findIndex((s) => s === null);
+  if (empty >= 0) {
+    slots[empty] = makeWeapon(weaponType);
+    slots[empty]!.modifiers = inheritedModifiers;
+    setActiveSlot(player, empty);
+    return { result: 'equip', slotIndex: empty };
+  }
+  const active = getActiveSlot(player);
+  const replaced = slots[active]?.primary ?? 'pulse_rifle';
+  slots[active] = makeWeapon(weaponType);
+  slots[active]!.modifiers = inheritedModifiers;
+  setActiveSlot(player, active);
+  return { result: 'swap', slotIndex: active, replaced };
+}
+
+let droppedPickupSeq = 0;
+
+/** A swapped-out weapon becomes a retrieveable ground pickup. */
+export function createDroppedWeaponPickup(
+  x: number,
+  y: number,
+  weaponType: WeaponType,
+): PowerUpPickup {
+  droppedPickupSeq += 1;
+  return {
+    id: `dropped_weapon_${droppedPickupSeq}`,
+    x,
+    y,
+    z: 0,
+    kind: 'weapon',
+    weaponType,
+    life: 30,
+  };
 }
 
 function resolveProjectileColor(baseColor: string, modifiers: WeaponModifier[]): string {

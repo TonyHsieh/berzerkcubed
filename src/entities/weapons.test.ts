@@ -12,7 +12,16 @@ import {
   damagePlayer,
   updatePlayer,
 } from './player';
-import { fireWeapon, MAX_WEAPON_LEVEL } from './weapons';
+import {
+  applyWeaponPickupToSlots,
+  createDroppedWeaponPickup,
+  cycleWeaponSlot,
+  fireWeapon,
+  MAX_WEAPON_LEVEL,
+  pickupLabel,
+  selectWeaponSlot,
+  WEAPON_SLOT_COUNT,
+} from './weapons';
 
 function makeEnemy(id: string, x: number, y: number, hp = 40): EnemyState {
   return {
@@ -145,6 +154,75 @@ describe('Weapons, Leveling & Combining', () => {
     expect(mines[0].kind).toBe('mine');
     expect(mines[0].vx).toBe(0);
     expect(mines[0].vy).toBe(0);
+  });
+});
+
+describe('3-slot weapon inventory & [F] equip/swap (Milestone 4)', () => {
+  it('starts with Pulse Rifle in slot 1 and two empty slots, with 1/2/3 and cycling', () => {
+    const config = createDifficultyConfig();
+    const player = createPlayer(0, 0, config);
+
+    expect(WEAPON_SLOT_COUNT).toBe(3);
+    expect(player.weaponSlots).toHaveLength(3);
+    expect(player.weaponSlots?.[0]?.primary).toBe('pulse_rifle');
+    expect(player.weaponSlots?.[1]).toBeNull();
+    expect(player.weaponSlots?.[2]).toBeNull();
+    expect(player.activeSlot).toBe(0);
+    expect(selectWeaponSlot(player, 1)).toBe(false); // empty slot cannot be selected
+
+    const equipped = applyWeaponPickupToSlots(player, 'spread');
+    expect(equipped.result).toBe('equip');
+    expect(equipped.slotIndex).toBe(1);
+    expect(player.activeSlot).toBe(1);
+    expect(player.weapon.primary).toBe('spread');
+
+    expect(selectWeaponSlot(player, 0)).toBe(true);
+    expect(player.weapon.primary).toBe('pulse_rifle');
+    expect(cycleWeaponSlot(player, 1)).toBe(true);
+    expect(player.activeSlot).toBe(1);
+    expect(cycleWeaponSlot(player, -1)).toBe(true);
+    expect(player.activeSlot).toBe(0);
+  });
+
+  it('levels up a carried weapon, then swaps the active slot when all 3 are full', () => {
+    const config = createDifficultyConfig();
+    const player = createPlayer(0, 0, config);
+    applyWeaponPickupToSlots(player, 'spread'); // slot 2
+    applyWeaponPickupToSlots(player, 'machine_gun'); // slot 3
+    expect(player.weaponSlots?.every((slot) => slot !== null)).toBe(true);
+
+    // Carried weapon -> level up instead of consuming a slot.
+    const before = player.weaponSlots?.[1]?.level ?? 0;
+    const upgrade = applyWeaponPickupToSlots(player, 'spread');
+    expect(upgrade.result).toBe('upgrade');
+    expect(player.weaponSlots?.[1]?.level).toBe(before + 1);
+
+    // All slots full with a different weapon -> replace active slot, hand back old one.
+    selectWeaponSlot(player, 2);
+    const activeBefore = player.weaponSlots?.[2]?.primary;
+    const swap = applyWeaponPickupToSlots(player, 'shotgun');
+    expect(swap.result).toBe('swap');
+    expect(swap.replaced).toBe(activeBefore);
+    expect(player.weapon.primary).toBe('shotgun');
+
+    const dropped = createDroppedWeaponPickup(100, 200, swap.replaced!);
+    expect(dropped.kind).toBe('weapon');
+    expect(dropped.weaponType).toBe(activeBefore);
+    expect(dropped.life).toBeGreaterThan(0);
+  });
+
+  it('gives every pickup type a distinct readable label', () => {
+    const pickup = {
+      id: 'lbl', x: 0, y: 0, z: 0,
+      kind: 'weapon' as const,
+      weaponType: 'machine_gun' as const,
+      life: 10,
+    };
+    expect(pickupLabel(pickup)).toBe('MGUN');
+    expect(pickupLabel({ ...pickup, kind: 'extra_life', weaponType: undefined })).toBe('1-UP');
+    expect(
+      pickupLabel({ ...pickup, kind: 'modifier', modifier: 'freeze', weaponType: undefined }),
+    ).toBe('FREEZE');
   });
 });
 

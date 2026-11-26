@@ -28,6 +28,13 @@ const RECOVER_SPEED = 60;
 
 const BLADE_CONTACT_DAMAGE = 32;
 
+// Milestone 4 bugfix: the blades used to shred EVERY projectile within reach in
+// EVERY phase, which made Maximilian effectively unkillable. Blades now only
+// guard his frontal arc while stalking/charging, heavy attacks punch through the
+// whirlwind, and recovery leaves his core completely exposed.
+const BLADE_ARC_HALF_DEG = 75;
+const RETRACTED_BLADE_RADIUS = 34;
+
 const MAXIMILIAN_TAUNTS = [
   'INTRUDER DETECTED. TERMINATE.',
   'BLADES ENGAGED. NO COVER WILL SAVE YOU.',
@@ -35,6 +42,28 @@ const MAXIMILIAN_TAUNTS = [
 ];
 
 let maximilianSeq = 0;
+
+/**
+ * Heavy / energy attacks punch through the 360° whirlwind guard. Standard bolts
+ * (and ricochets) are still shredded. Grenade explosions are resolved by the
+ * blast-radius code in gameState, so the grenade carrier itself bypasses blades.
+ */
+export function projectileBypassesBlades(p: Projectile): boolean {
+  return (
+    p.kind === 'beam_segment' ||
+    p.kind === 'lightning' ||
+    p.kind === 'grenade' ||
+    p.modifiers.includes('pierce') ||
+    p.modifiers.includes('lightning_chain')
+  );
+}
+
+/** True when a projectile sits inside Maximilian's frontal ±75° blade arc. */
+export function inFrontalBladeArc(boss: BossState, dx: number, dy: number): boolean {
+  const projAngle = vectorToAngleDeg(dx, dy);
+  const delta = ((projAngle - boss.angle + 540) % 360) - 180;
+  return Math.abs(delta) <= BLADE_ARC_HALF_DEG;
+}
 
 export function createMaximilian(x: number, y: number): BossState {
   maximilianSeq += 1;
@@ -134,7 +163,8 @@ export function updateMaximilian(
     } else if (boss.phase === 'whirlwind') {
       boss.phase = 'recover';
       boss.phaseTimer = RECOVER_DURATION;
-      boss.bladeRadius = MAXIMILIAN_BLADE_RADIUS;
+      boss.bladeRadius = RETRACTED_BLADE_RADIUS;
+      events.push({ type: 'sfx', sound: 'blade_whirr', x: boss.x, y: boss.y });
     } else {
       boss.phase = 'stalk';
       boss.phaseTimer = STALK_DURATION;
@@ -179,25 +209,39 @@ export function updateMaximilian(
     boss.angle = vectorToAngleDeg(dx, dy);
   }
 
-  // 1. Whirling blades shred incoming player projectiles
+  // 1. Blade shredding is now phase- and attack-aware (Milestone 4 bugfix).
+  //    recover: blades retracted -> fully vulnerable from every angle.
+  //    stalk/charge: only the frontal ±75° arc shreds -> flanks/rear are safe.
+  //    whirlwind: 360° shred, but beams/lightning/grenades/pierce punch through.
   for (let i = 0; i < projectiles.length; i++) {
     const p = projectiles[i];
     if (p.life <= 0 || p.owner !== 'player') continue;
+    if (boss.phase === 'recover') continue;
+
     const reach = boss.bladeRadius + p.radius;
     const pdx = p.x - boss.x;
     const pdy = p.y - boss.y;
-    if (pdx * pdx + pdy * pdy <= reach * reach) {
-      p.life = 0;
-      events.push({ type: 'sfx', sound: 'blade_whirr', x: p.x, y: p.y });
-      events.push({
-        type: 'vfx_explosion',
-        x: p.x,
-        y: p.y,
-        z: p.z,
-        color: '#ff3355',
-        count: 6,
-      });
+    if (pdx * pdx + pdy * pdy > reach * reach) continue;
+
+    let shred = false;
+    if (boss.phase === 'whirlwind') {
+      shred = !projectileBypassesBlades(p);
+    } else {
+      // stalk / charge: only the frontal blade arc blocks standard fire
+      shred = inFrontalBladeArc(boss, pdx, pdy);
     }
+    if (!shred) continue;
+
+    p.life = 0;
+    events.push({ type: 'sfx', sound: 'blade_whirr', x: p.x, y: p.y });
+    events.push({
+      type: 'vfx_explosion',
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      color: '#ff3355',
+      count: 6,
+    });
   }
 
   // 2. Whirling blades shred destructible tech crates/cover

@@ -87,3 +87,11 @@ All parallel `herdr` worktrees import types from `src/engine/types.ts` and imple
 - `damageBossPart(boss: BossState, hitX: number, hitY: number, damage: number, events: GameEvent[]): boolean`
 - `createEvilOtto(x: number, y: number, sectorIndex: number): BossState`
 - `updateEvilOtto(boss: BossState, player: PlayerState, dt: number, events: GameEvent[]): Projectile[]` (Sinistar-style taunt during reconstruction + Mega Man-style variant attacks)
+
+## Milestone 4 — Added contracts (implemented on `main`)
+- `src/engine/input.ts`: `parseGamepadSnapshot(pad: GamepadLike, deadzone = 0.18): GamepadSnapshot` is pure and Node-testable. `GamepadSnapshot` exposes `moveX/moveY`, `aimX/aimY`, `firing`, `dodge`, `swap`, `slotCycle`, `swivelDir`. `InputState` now also carries `aimX/aimY`, `swapPressed`, `slotSelect` (-1 or 0..2) and `slotCycle` (-1|0|1).
+- `src/entities/weapons.ts`: 3-slot inventory helpers `ensureWeaponSlots(player)`, `selectWeaponSlot(player, index)`, `cycleWeaponSlot(player, dir)`, `applyWeaponPickupToSlots(player, weaponType): WeaponSwapOutcome`, `createDroppedWeaponPickup(x, y, weaponType)`, `pickupLabel(pickup)`, `weaponPickupLabel(type)`, `WEAPON_SLOT_COUNT = 3`. `PlayerState.weapon` always mirrors `weaponSlots[activeSlot]`.
+- `src/game/gameState.ts`: `GameState.nearbyWeaponPickup` and `GameState.toast` are the HUD/renderer-facing state for the `[F]` prompt and pickup notifications. Weapon pickups are **not** auto-collected; all other pickup kinds still are.
+- `src/render/models.ts`: `getBakeTasks(cache, models, scale, spacing): BakeTask[]` is the single bake list used by both `bakeSwarmCaches` (sync) and `bootstrapAssets` (async).
+- `src/game/loading.ts`: `bootstrapAssets(onProgress)` resolves `{ models, cache }` after frame-yielded bakes; `createLoadingScreen()` returns `{ setProgress, finish, destroy }`. `createRenderer` accepts optional pre-baked `models`/`cache` so no work is repeated.
+- `src/bosses/maximilian.ts`: `projectileBypassesBlades(p)` and `inFrontalBladeArc(boss, dx, dy)` are exported for headless tests.
