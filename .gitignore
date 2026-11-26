@@ -4,5 +4,6 @@ coverage/
 .vite/
 .direnv/
 .devenv/
+context/
 .DS_Store
 *.log
