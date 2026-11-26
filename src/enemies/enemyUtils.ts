@@ -121,3 +121,58 @@ export function resolveEnemyAgainstIsland(
     if (entity.y > y + h - r) entity.y = y + h - r;
   }
 }
+
+/** Milestone 4.14: Freeze Gun exact cumulative slow & recovery constants. */
+export const FREEZE_HIT_SLOW = 0.02;
+export const FREEZE_MAX_SLOW = 0.85;
+export const FREEZE_RECOVERY_PER_SEC = 0.01;
+
+/**
+ * Adds +2% cumulative speed slow (`+0.02`), clamped at `0.85` max.
+ */
+export function applyFreezeHit(target: {
+  chillSlow?: number;
+  freezeTimer?: number;
+}): number {
+  const next = Math.min(FREEZE_MAX_SLOW, (target.chillSlow ?? 0) + FREEZE_HIT_SLOW);
+  target.chillSlow = next;
+  if (target.freezeTimer !== undefined) {
+    target.freezeTimer = Math.max(target.freezeTimer, 2.5);
+  }
+  return next;
+}
+
+/**
+ * Recovers `chillSlow` by `-0.01 * dt` (1% speed recovered per second) down to `0`.
+ */
+export function recoverChillSlow(
+  target: { chillSlow?: number },
+  dt: number,
+): number {
+  const cur = target.chillSlow ?? 0;
+  if (cur <= 0 || dt <= 0) {
+    target.chillSlow = Math.max(0, cur);
+    return target.chillSlow;
+  }
+  const next = Math.max(0, cur - FREEZE_RECOVERY_PER_SEC * dt);
+  target.chillSlow = next;
+  return next;
+}
+
+/**
+ * Returns the movement speed multiplier `(1 - chillSlow)` when chilled, falling
+ * back to legacy `freezeTimer` slow (0.35) only when `chillSlow` is unset/0.
+ */
+export function getChillSpeedMultiplier(target: {
+  chillSlow?: number;
+  freezeTimer?: number;
+}): number {
+  const chill = target.chillSlow ?? 0;
+  if (chill > 0) {
+    return Math.max(1 - FREEZE_MAX_SLOW, 1 - Math.min(FREEZE_MAX_SLOW, chill));
+  }
+  if ((target.freezeTimer ?? 0) > 0) {
+    return 0.35;
+  }
+  return 1;
+}

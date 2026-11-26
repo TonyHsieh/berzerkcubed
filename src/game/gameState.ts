@@ -1,5 +1,10 @@
 import { createDifficultyConfig } from '../config/difficulty';
-import { createAbb, updateAbb } from '../bosses/abb';
+import {
+  ABB_ICBM_BLAST_RADIUS,
+  createAbb,
+  steerGuidedIcbm,
+  updateAbb,
+} from '../bosses/abb';
 import {
   applyHigherSectorBossScaling,
   BOSS_REZ_DURATION,
@@ -11,13 +16,18 @@ import {
   updateBugHive,
 } from '../bosses/bugHive';
 import { createEvilOtto, updateEvilOtto } from '../bosses/evilOtto';
-import { createMaximilian, updateMaximilian } from '../bosses/maximilian';
+import {
+  createMaximilian,
+  interceptProjectileWithAblativeShields,
+  updateMaximilian,
+} from '../bosses/maximilian';
 import {
   createRecogniser,
   damageBossPart,
   updateRecogniser,
 } from '../bosses/recogniser';
 import { createSkullhead, updateSkullhead } from '../bosses/skullhead';
+import { applyFreezeHit } from '../enemies/enemyUtils';
 import { isMeleeEnemyKind, updateEnforcers } from '../enemies/enforcer';
 import { GRENADE_GRAVITY, updateRangedEnemies } from '../enemies/shooter';
 import { spawnHordeWave, SAFE_SPAWN_CLEARANCE } from '../enemies/spawner';
@@ -76,10 +86,14 @@ export const FIXED_DT = 1 / 60;
 const MAX_STEP_DT = 0.05;
 const PICKUP_COLLECT_RADIUS = 18;
 const ENFORCER_MELEE_DAMAGE = 14;
-const GRENADE_BLAST_RADIUS = 72;
+export const GRENADE_BLAST_RADIUS = 96;
 const SKY_BOMB_BLAST_RADIUS = 68;
 const MINE_BLAST_RADIUS = 64;
-const LIGHTNING_CHAIN_RANGE = 180;
+export const LIGHTNING_CHAIN_RADIUS = 130;
+export const LIGHTNING_FLASH_SEC = 0.16;
+export const BURN_DURATION_SEC = 3.0;
+const BURN_TICK_INTERVAL_SEC = 0.35;
+const BURN_TICK_DAMAGE = 6;
 const WAVE_INTERVAL_SEC = 5.5;
 const INITIAL_WAVE_DELAY_SEC = 0.5;
 const POST_REZ_HALO_SEC = 0.15;
@@ -236,7 +250,7 @@ function createScaledBoss(
       boss = createBrainbot(x, y);
       break;
     default:
-      boss = createMaximilian(x, y);
+      boss = createMaximilian(x, y, sectorIndex);
       break;
   }
 
@@ -457,6 +471,15 @@ function scoreForEnemy(kind: EnemyState['kind']): number {
   }
 }
 
+interface DetonationOptions {
+  shakeMag?: number;
+  shakeDur?: number;
+  shockwaveRings?: number;
+  particleCount?: number;
+  smokeCount?: number;
+  damageCratesWhenHostile?: boolean;
+}
+
 function detonateAreaDamage(
   state: GameState,
   x: number,
@@ -465,7 +488,13 @@ function detonateAreaDamage(
   damage: number,
   owner: Projectile['owner'],
   color: string,
+  opts: DetonationOptions = {},
 ): void {
+  const shakeMag = opts.shakeMag ?? 9;
+  const shakeDur = opts.shakeDur ?? 0.24;
+  const shockwaveRings = opts.shockwaveRings ?? 2;
+  const particleCount = opts.particleCount ?? 22;
+
   state.events.push(
     {
       type: 'vfx_explosion',
@@ -473,19 +502,41 @@ function detonateAreaDamage(
       y,
       z: 8,
       color,
-      count: 18,
+      count: particleCount,
+    },
+    {
+      type: 'vfx_shockwave',
+      x,
+      y,
+      z: 6,
+      radius: blastRadius,
+      color: '#fb923c',
+      rings: shockwaveRings,
     },
     { type: 'sfx', sound: 'explosion', x, y },
-    { type: 'camera_shake', magnitude: 7, duration: 0.2 },
+    { type: 'camera_shake', magnitude: shakeMag, duration: shakeDur },
   );
 
+  if ((opts.smokeCount ?? 0) > 0) {
+    state.events.push({
+      type: 'vfx_explosion',
+      x,
+      y,
+      z: 14,
+      color: '#94a3b8',
+      count: opts.smokeCount!,
+    });
+  }
+
   if (owner === 'player') {
-    const nearby = state.grid.queryRadius(x, y, blastRadius);
-    for (let i = 0; i < nearby.length; i++) {
-      const e = nearby[i];
+    for (let i = 0; i < state.enemies.length; i++) {
+      const e = state.enemies[i];
       if (e.hp <= 0 || (e.rezTimer ?? 0) > 0) continue;
-      e.hp -= damage;
-      e.hitFlash = 0.14;
+      const dist = Math.hypot(e.x - x, e.y - y);
+      if (dist <= blastRadius + e.radius) {
+        e.hp -= damage;
+        e.hitFlash = 0.14;
+      }
     }
 
     for (let i = state.island.crates.length - 1; i >= 0; i--) {
@@ -499,14 +550,119 @@ function detonateAreaDamage(
     }
 
     if (state.boss && state.boss.hp > 0) {
-      applyProjectileToBoss(state, x, y, blastRadius * 0.5, damage);
+      applyProjectileToBoss(state, x, y, blastRadius * 0.6, damage);
     }
   } else {
     const distToPlayer = Math.hypot(state.player.x - x, state.player.y - y);
     if (distToPlayer <= blastRadius + state.player.radius) {
       damagePlayer(state.player, damage, state.config, state.events);
     }
+
+    if (opts.damageCratesWhenHostile) {
+      for (let i = state.island.crates.length - 1; i >= 0; i--) {
+        const crate = state.island.crates[i];
+        if (crate.hp <= 0) continue;
+        const dist = Math.hypot(crate.x - x, crate.y - y);
+        if (dist <= blastRadius + crate.radius) {
+          const pickup = damageCrate(state.island, crate.id, damage, state.events);
+          if (pickup) state.pickups.push(pickup);
+        }
+      }
+    }
   }
+}
+
+function detonateIcbm(
+  state: GameState,
+  x: number,
+  y: number,
+  p: Projectile,
+): void {
+  detonateAreaDamage(
+    state,
+    x,
+    y,
+    p.blastRadius ?? ABB_ICBM_BLAST_RADIUS,
+    p.damage,
+    p.owner,
+    '#f97316',
+    {
+      shakeMag: 16,
+      shakeDur: 0.36,
+      shockwaveRings: 3,
+      particleCount: 28,
+      smokeCount: 14,
+      damageCratesWhenHostile: true,
+    },
+  );
+}
+
+/**
+ * Milestone 4.14: Lightning Gun chain-hit helper.
+ * Flashes the initial victim white/electric-blue and greedily chains to up to
+ * `maxChains` (`2 * player.weapon.level`) nearby enemies within `LIGHTNING_CHAIN_RADIUS`
+ * without repeating targets, drawing jagged white/cyan arcs between hops.
+ */
+export function triggerLightningChain(
+  state: GameState,
+  initialTarget: EnemyState,
+  baseDamage: number,
+  maxChains: number,
+): EnemyState[] {
+  initialTarget.lightningFlashTimer = LIGHTNING_FLASH_SEC;
+  const chained: EnemyState[] = [];
+  if (maxChains <= 0) return chained;
+
+  const visited = new Set<string>([initialTarget.id]);
+  let current = initialTarget;
+  const chainDamage = Math.max(1, Math.round(baseDamage * 0.65));
+  const maxRangeSq = LIGHTNING_CHAIN_RADIUS * LIGHTNING_CHAIN_RADIUS;
+
+  for (let hop = 0; hop < maxChains; hop++) {
+    let best: EnemyState | null = null;
+    let bestDistSq = maxRangeSq;
+
+    for (let i = 0; i < state.enemies.length; i++) {
+      const cand = state.enemies[i];
+      if (cand.hp <= 0 || (cand.rezTimer ?? 0) > 0 || visited.has(cand.id)) {
+        continue;
+      }
+      const dx = cand.x - current.x;
+      const dy = cand.y - current.y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq <= bestDistSq) {
+        bestDistSq = dSq;
+        best = cand;
+      }
+    }
+
+    if (!best) break;
+    visited.add(best.id);
+    best.hp -= chainDamage;
+    best.hitFlash = 0.12;
+    best.lightningFlashTimer = LIGHTNING_FLASH_SEC;
+    chained.push(best);
+
+    state.events.push(
+      {
+        type: 'vfx_lightning_arc',
+        x1: current.x,
+        y1: current.y,
+        x2: best.x,
+        y2: best.y,
+        color: '#67e8f9',
+      },
+      {
+        type: 'sfx',
+        sound: 'electric_zap',
+        x: best.x,
+        y: best.y,
+      },
+    );
+    current = best;
+  }
+
+  return chained;
 }
 
 function applyProjectileToBoss(
@@ -592,19 +748,27 @@ function advanceProjectiles(
     p.life -= dt;
 
     if (p.kind === 'homing_drone') {
-      p.targetX = state.player.x;
-      p.targetY = state.player.y;
-      const dx = state.player.x - p.x;
-      const dy = state.player.y - p.y;
-      const dist = Math.hypot(dx, dy);
-      if (dist > 1e-4) {
-        const speed = Math.max(110, Math.hypot(p.vx, p.vy));
-        const desiredVx = (dx / dist) * speed;
-        const desiredVy = (dy / dist) * speed;
-        const turn = Math.min(1, dt * 3.2);
-        p.vx += (desiredVx - p.vx) * turn;
-        p.vy += (desiredVy - p.vy) * turn;
+      if (p.icbm) {
+        steerGuidedIcbm(p, state.player.x, state.player.y, dt);
+      } else {
+        p.targetX = state.player.x;
+        p.targetY = state.player.y;
+        const dx = state.player.x - p.x;
+        const dy = state.player.y - p.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 1e-4) {
+          const speed = Math.max(110, Math.hypot(p.vx, p.vy));
+          const desiredVx = (dx / dist) * speed;
+          const desiredVy = (dy / dist) * speed;
+          const turn = Math.min(1, dt * 3.2);
+          p.vx += (desiredVx - p.vx) * turn;
+          p.vy += (desiredVy - p.vy) * turn;
+        }
       }
+    }
+
+    if (p.kind === 'sawblade') {
+      p.spinAngle = ((p.spinAngle ?? 0) + 900 * dt) % 360;
     }
 
     const prevX = p.x;
@@ -615,26 +779,23 @@ function advanceProjectiles(
     if (p.kind === 'grenade') {
       p.vz -= GRENADE_GRAVITY * dt;
       p.z += p.vz * dt;
-      if (p.z <= 0 || p.life <= 0) {
-        if (p.bouncesLeft > 0 && p.life > 0) {
-          p.z = 0;
-          p.vz = Math.abs(p.vz) * 0.45;
-          p.vx *= 0.6;
-          p.vy *= 0.6;
-          p.bouncesLeft -= 1;
-        } else {
-          p.z = 0;
-          p.life = 0;
-          detonateAreaDamage(
-            state,
-            p.x,
-            p.y,
-            GRENADE_BLAST_RADIUS,
-            p.damage,
-            p.owner,
-            p.color,
-          );
-        }
+      const hitWall = pointHitsSolidWall(p.x, p.y, p.radius, state.island);
+      if (hitWall || p.z <= 0 || p.life <= 0) {
+        const detX = hitWall ? prevX : p.x;
+        const detY = hitWall ? prevY : p.y;
+        p.x = detX;
+        p.y = detY;
+        p.z = 0;
+        p.life = 0;
+        detonateAreaDamage(
+          state,
+          detX,
+          detY,
+          p.blastRadius ?? GRENADE_BLAST_RADIUS,
+          p.damage,
+          p.owner,
+          p.color,
+        );
       }
       continue;
     }
@@ -672,8 +833,66 @@ function advanceProjectiles(
       continue;
     }
 
+    // Milestone 4.14: Thrown sawblades shred destructible crates with bright metallic sparks
+    if (p.kind === 'sawblade') {
+      for (let k = state.island.crates.length - 1; k >= 0; k--) {
+        const crate = state.island.crates[k];
+        if (crate.hp <= 0) continue;
+        const hitDist = p.radius + crate.radius;
+        if ((crate.x - p.x) ** 2 + (crate.y - p.y) ** 2 <= hitDist * hitDist) {
+          const pickup = damageCrate(state.island, crate.id, crate.maxHp + 10, state.events);
+          if (pickup) state.pickups.push(pickup);
+          state.events.push(
+            { type: 'vfx_explosion', x: crate.x, y: crate.y, z: 12, color: '#ffffff', count: 8 },
+            { type: 'vfx_explosion', x: crate.x, y: crate.y, z: 12, color: '#f59e0b', count: 10 },
+            { type: 'sfx', sound: 'electric_zap', x: crate.x, y: crate.y },
+          );
+        }
+      }
+    }
+
+    // Milestone 4.14: ABB ICBM detonates on crate impact with massive world-shaking blast
+    if (p.icbm) {
+      let hitCrate = false;
+      for (let k = state.island.crates.length - 1; k >= 0; k--) {
+        const crate = state.island.crates[k];
+        if (crate.hp <= 0) continue;
+        const hitDist = p.radius + crate.radius;
+        if ((crate.x - p.x) ** 2 + (crate.y - p.y) ** 2 <= hitDist * hitDist) {
+          hitCrate = true;
+          break;
+        }
+      }
+      if (hitCrate) {
+        p.life = 0;
+        detonateIcbm(state, p.x, p.y, p);
+        continue;
+      }
+    }
+
     // Solid wall collision / ricochet for standard projectiles
     if (pointHitsSolidWall(p.x, p.y, p.radius, state.island)) {
+      if (p.icbm) {
+        p.life = 0;
+        detonateIcbm(state, prevX, prevY, p);
+        continue;
+      }
+
+      if (p.kind === 'sawblade') {
+        // Bright metallic spark shower on wall/door impact, then bounce once or shatter
+        state.events.push(
+          { type: 'vfx_explosion', x: prevX, y: prevY, z: 14, color: '#ffffff', count: 8 },
+          { type: 'vfx_explosion', x: prevX, y: prevY, z: 14, color: '#f59e0b', count: 12 },
+          { type: 'sfx', sound: 'electric_zap', x: prevX, y: prevY },
+        );
+      } else if (p.owner === 'boss' && p.kind === 'beam_segment') {
+        state.events.push(
+          { type: 'vfx_sizzle', x: prevX, y: prevY, z: 16 },
+          { type: 'vfx_explosion', x: prevX, y: prevY, z: 16, color: '#fb923c', count: 5 },
+          { type: 'sfx', sound: 'electric_zap', x: prevX, y: prevY },
+        );
+      }
+
       if (p.bouncesLeft > 0) {
         p.bouncesLeft -= 1;
         const hitXOnly = pointHitsSolidWall(p.x, prevY, p.radius, state.island);
@@ -692,7 +911,9 @@ function advanceProjectiles(
           p.x = prevX;
           p.y = prevY;
         }
-        state.events.push({ type: 'sfx', sound: 'electric_zap', x: p.x, y: p.y });
+        if (p.kind !== 'sawblade') {
+          state.events.push({ type: 'sfx', sound: 'electric_zap', x: p.x, y: p.y });
+        }
       } else {
         p.life = 0;
       }
@@ -706,9 +927,6 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
   for (let i = 0; i < projs.length; i++) {
     const p = projs[i];
     if (p.life <= 0) continue;
-
-    // Airborne grenades fly over obstacles until they land
-    if (p.kind === 'grenade' && p.z > 28) continue;
 
     // 1. vs Enemies (O(1) via SpatialGrid)
     const candidates = state.grid.queryRadius(p.x, p.y, p.radius + 18);
@@ -729,7 +947,7 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
           state,
           p.x,
           p.y,
-          p.kind === 'mine' ? MINE_BLAST_RADIUS : GRENADE_BLAST_RADIUS,
+          p.kind === 'mine' ? MINE_BLAST_RADIUS : p.blastRadius ?? GRENADE_BLAST_RADIUS,
           p.damage,
           'player',
           p.color,
@@ -740,38 +958,21 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
 
       enemy.hp -= p.damage;
       enemy.hitFlash = 0.12;
+      if (p.kind === 'flame') {
+        enemy.burnTimer = Math.max(enemy.burnTimer ?? 0, BURN_DURATION_SEC);
+        enemy.burnTickTimer = enemy.burnTickTimer ?? 0;
+        state.events.push({ type: 'vfx_flame_smoke', x: enemy.x, y: enemy.y, z: 12 });
+      }
       if (p.modifiers.includes('freeze')) {
-        enemy.freezeTimer = Math.max(enemy.freezeTimer, 2.5);
+        applyFreezeHit(enemy);
       }
       state.events.push({ type: 'sfx', sound: 'hit', x: enemy.x, y: enemy.y });
 
-      if (p.modifiers.includes('lightning_chain') && p.bouncesLeft > 0) {
-        p.bouncesLeft -= 1;
-        const nearby = state.grid.queryRadius(enemy.x, enemy.y, LIGHTNING_CHAIN_RANGE);
-        let nextTarget: EnemyState | null = null;
-        let bestDistSq = LIGHTNING_CHAIN_RANGE * LIGHTNING_CHAIN_RANGE;
-        for (let k = 0; k < nearby.length; k++) {
-          const other = nearby[k];
-          if (other.id === enemy.id || other.hp <= 0) continue;
-          const dSq = (other.x - enemy.x) ** 2 + (other.y - enemy.y) ** 2;
-          if (dSq < bestDistSq) {
-            bestDistSq = dSq;
-            nextTarget = other;
-          }
-        }
-        if (nextTarget) {
-          const speed = Math.max(320, Math.hypot(p.vx, p.vy));
-          const dist = Math.max(1, Math.sqrt(bestDistSq));
-          p.vx = ((nextTarget.x - enemy.x) / dist) * speed;
-          p.vy = ((nextTarget.y - enemy.y) / dist) * speed;
-          p.x = enemy.x + ((nextTarget.x - enemy.x) / dist) * (enemy.radius + p.radius + 2);
-          p.y = enemy.y + ((nextTarget.y - enemy.y) / dist) * (enemy.radius + p.radius + 2);
-          state.events.push({
-            type: 'sfx',
-            sound: 'electric_zap',
-            x: enemy.x,
-            y: enemy.y,
-          });
+      if (p.kind === 'lightning' || p.modifiers.includes('lightning_chain')) {
+        const maxChains = 2 * Math.max(1, state.player.weapon.level);
+        triggerLightningChain(state, enemy, p.damage, maxChains);
+        if (p.modifiers.includes('pierce') && p.bouncesLeft > 0) {
+          p.bouncesLeft -= 1;
         } else {
           p.life = 0;
         }
@@ -795,6 +996,19 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
       const dy = crate.y - p.y;
       const hitDist = p.radius + crate.radius;
       if (dx * dx + dy * dy <= hitDist * hitDist) {
+        if (p.kind === 'grenade' || p.kind === 'mine') {
+          p.life = 0;
+          detonateAreaDamage(
+            state,
+            p.x,
+            p.y,
+            p.kind === 'mine' ? MINE_BLAST_RADIUS : p.blastRadius ?? GRENADE_BLAST_RADIUS,
+            p.damage,
+            'player',
+            p.color,
+          );
+          break;
+        }
         const pickup = damageCrate(state.island, crate.id, p.damage, state.events);
         if (pickup) {
           state.pickups.push(pickup);
@@ -810,7 +1024,7 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
 
     if (p.life <= 0) continue;
 
-    // 3. vs Boss Parts (Bug Hive orbiting bugs intercept incoming shots first)
+    // 3. vs Boss Parts (Bug Hive orbiting bugs & Maximilian ablative shield plates intercept first)
     if (state.boss && state.boss.hp > 0) {
       if (
         state.boss.kind === 'bug_hive' &&
@@ -818,9 +1032,41 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
       ) {
         if (p.life <= 0) continue;
       }
+      if (
+        state.boss.kind === 'maximilian' &&
+        interceptProjectileWithAblativeShields(state.boss, p, state.events)
+      ) {
+        if (p.life <= 0) continue;
+      }
+      if (p.kind === 'grenade') {
+        const dBoss = Math.hypot(state.boss.x - p.x, state.boss.y - p.y);
+        if (dBoss <= state.boss.radius + p.radius) {
+          p.life = 0;
+          detonateAreaDamage(
+            state,
+            p.x,
+            p.y,
+            p.blastRadius ?? GRENADE_BLAST_RADIUS,
+            p.damage,
+            'player',
+            p.color,
+          );
+          continue;
+        }
+      }
       const res = applyProjectileToBoss(state, p.x, p.y, p.radius, p.damage);
       if (res.hit) {
         if (res.damaged) {
+          if (p.kind === 'flame') {
+            state.boss.burnTimer = Math.max(state.boss.burnTimer ?? 0, BURN_DURATION_SEC);
+            state.boss.burnTickTimer = state.boss.burnTickTimer ?? 0;
+          }
+          if (p.modifiers.includes('freeze')) {
+            applyFreezeHit(state.boss);
+          }
+          if (p.kind === 'lightning' || p.modifiers.includes('lightning_chain')) {
+            state.boss.lightningFlashTimer = LIGHTNING_FLASH_SEC;
+          }
           state.events.push({ type: 'sfx', sound: 'hit', x: p.x, y: p.y });
         }
         if (p.modifiers.includes('pierce') && p.bouncesLeft > 0 && res.damaged) {
@@ -842,14 +1088,28 @@ function resolveHostileProjectilesVsPlayer(
     const p = list[i];
     if (p.life <= 0) continue;
 
-    // Airborne grenades and sky-bombs only damage via ground detonation
-    if ((p.kind === 'grenade' || p.kind === 'sky_bomb') && p.z > 20) continue;
+    // Airborne sky-bombs only damage via ground detonation; grenades detonate on close contact
+    if (p.kind === 'sky_bomb' && p.z > 20) continue;
 
     const dx = player.x - p.x;
     const dy = player.y - p.y;
     const hitDist = p.radius + player.radius;
     if (dx * dx + dy * dy <= hitDist * hitDist) {
-      if (!isPlayerInvulnerable(player)) {
+      if (p.icbm) {
+        p.life = 0;
+        detonateIcbm(state, p.x, p.y, p);
+      } else if (p.kind === 'grenade') {
+        p.life = 0;
+        detonateAreaDamage(
+          state,
+          p.x,
+          p.y,
+          p.blastRadius ?? GRENADE_BLAST_RADIUS,
+          p.damage,
+          p.owner,
+          p.color,
+        );
+      } else if (!isPlayerInvulnerable(player)) {
         damagePlayer(player, p.damage, state.config, state.events);
         p.life = 0;
       }
@@ -1280,10 +1540,25 @@ export function stepGameState(
     }
   }
 
-  // Enemy world hazards (electrified walls / open-edge falls) & melee contact
+  // Enemy world hazards (electrified walls / open-edge falls), burning DOT & melee contact
   for (let i = 0; i < state.enemies.length; i++) {
     const e = state.enemies[i];
     if (e.hp <= 0 || (e.rezTimer ?? 0) > 0) continue;
+
+    // Milestone 4.14: Flamethrower burning DOT + continuous flame/smoke particles
+    if ((e.burnTimer ?? 0) > 0) {
+      e.burnTimer = Math.max(0, (e.burnTimer ?? 0) - clampedDt);
+      const prevTick = e.burnTickTimer ?? 0;
+      e.burnTickTimer = prevTick + clampedDt;
+      if (e.burnTickTimer >= BURN_TICK_INTERVAL_SEC) {
+        e.burnTickTimer -= BURN_TICK_INTERVAL_SEC;
+        e.hp -= BURN_TICK_DAMAGE;
+        e.hitFlash = Math.max(e.hitFlash, 0.08);
+        state.events.push({ type: 'vfx_flame_smoke', x: e.x, y: e.y, z: 12 });
+      } else if (Math.floor((prevTick + clampedDt) / 0.12) > Math.floor(prevTick / 0.12)) {
+        state.events.push({ type: 'vfx_flame_smoke', x: e.x, y: e.y, z: 12 });
+      }
+    }
 
     const worldRes = resolveEntityAgainstWorld(e, state.island);
     if (worldRes.hitElectrifiedWall) {
@@ -1344,7 +1619,7 @@ export function stepGameState(
       state.boss.rezHaloTimer = Math.max(0, (state.boss.rezHaloTimer ?? 0) - clampedDt);
     }
     if (state.boss.kind === 'maximilian') {
-      updateMaximilian(
+      const maxFired = updateMaximilian(
         state.boss,
         state.player,
         state.island,
@@ -1352,6 +1627,9 @@ export function stepGameState(
         clampedDt,
         state.events,
       );
+      if (maxFired.length > 0) {
+        state.bossProjectiles.push(...maxFired);
+      }
       // Remove crates shredded by Maximilian's whirling blades
       for (let i = state.island.crates.length - 1; i >= 0; i--) {
         if (state.island.crates[i].hp <= 0) {
@@ -1395,6 +1673,7 @@ export function stepGameState(
         state.player,
         clampedDt,
         state.events,
+        state.island,
       );
       if (skullFired.length > 0) {
         state.bossProjectiles.push(...skullFired);
@@ -1423,6 +1702,17 @@ export function stepGameState(
     }
     if (bossWasRezzing && (state.boss.rezTimer ?? 0) <= 0) {
       state.boss.rezHaloTimer = POST_REZ_HALO_SEC;
+    }
+    if ((state.boss.burnTimer ?? 0) > 0 && (state.boss.rezTimer ?? 0) <= 0 && !state.boss.reconstructing) {
+      state.boss.burnTimer = Math.max(0, (state.boss.burnTimer ?? 0) - clampedDt);
+      const prevTick = state.boss.burnTickTimer ?? 0;
+      state.boss.burnTickTimer = prevTick + clampedDt;
+      if (state.boss.burnTickTimer >= BURN_TICK_INTERVAL_SEC) {
+        state.boss.burnTickTimer -= BURN_TICK_INTERVAL_SEC;
+        state.boss.hp = Math.max(0, state.boss.hp - BURN_TICK_DAMAGE);
+        state.boss.hitFlash = Math.max(state.boss.hitFlash, 0.08);
+        state.events.push({ type: 'vfx_flame_smoke', x: state.boss.x, y: state.boss.y, z: state.boss.z + 18 });
+      }
     }
   }
 

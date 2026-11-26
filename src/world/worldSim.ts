@@ -284,3 +284,104 @@ export function pointHitsSolidWall(
 
   return false;
 }
+
+export interface RaycastHit {
+  x: number;
+  y: number;
+  dist: number;
+  hit: boolean;
+}
+
+function intersectRayRect(
+  ox: number,
+  oy: number,
+  dx: number,
+  dy: number,
+  maxDist: number,
+  r: Rect,
+): number | null {
+  let tMin = 0;
+  let tMax = maxDist;
+
+  if (Math.abs(dx) < 1e-8) {
+    if (ox < r.x || ox > r.x + r.w) return null;
+  } else {
+    const invD = 1 / dx;
+    let t1 = (r.x - ox) * invD;
+    let t2 = (r.x + r.w - ox) * invD;
+    if (t1 > t2) {
+      const tmp = t1;
+      t1 = t2;
+      t2 = tmp;
+    }
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return null;
+  }
+
+  if (Math.abs(dy) < 1e-8) {
+    if (oy < r.y || oy > r.y + r.h) return null;
+  } else {
+    const invD = 1 / dy;
+    let t1 = (r.y - oy) * invD;
+    let t2 = (r.y + r.h - oy) * invD;
+    if (t1 > t2) {
+      const tmp = t1;
+      t1 = t2;
+      t2 = tmp;
+    }
+    tMin = Math.max(tMin, t1);
+    tMax = Math.min(tMax, t2);
+    if (tMin > tMax) return null;
+  }
+
+  return tMin >= 0 && tMin <= maxDist ? tMin : null;
+}
+
+/**
+ * Milestone 4.14: Raycasts a segment from `(startX, startY)` along unit direction
+ * `(dirX, dirY)` up to `maxDist` against all solid walls and closed sliding doors.
+ */
+export function raycastSolidWalls(
+  startX: number,
+  startY: number,
+  dirX: number,
+  dirY: number,
+  maxDist: number,
+  island: PlatformIsland,
+): RaycastHit {
+  const len = Math.hypot(dirX, dirY);
+  if (len < 1e-8 || maxDist <= 0) {
+    return { x: startX, y: startY, dist: 0, hit: false };
+  }
+  const ux = dirX / len;
+  const uy = dirY / len;
+
+  let bestT = maxDist;
+  let hit = false;
+
+  for (let i = 0; i < island.walls.length; i++) {
+    const t = intersectRayRect(startX, startY, ux, uy, bestT, island.walls[i]);
+    if (t !== null && t < bestT) {
+      bestT = t;
+      hit = true;
+    }
+  }
+
+  for (let i = 0; i < island.doors.length; i++) {
+    const d = island.doors[i];
+    if (d.openFraction >= DOOR_PASSABLE_THRESHOLD) continue;
+    const t = intersectRayRect(startX, startY, ux, uy, bestT, d);
+    if (t !== null && t < bestT) {
+      bestT = t;
+      hit = true;
+    }
+  }
+
+  return {
+    x: startX + ux * bestT,
+    y: startY + uy * bestT,
+    dist: bestT,
+    hit,
+  };
+}

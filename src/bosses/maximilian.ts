@@ -3,13 +3,19 @@ import {
   vectorToAngleDeg,
 } from '../enemies/enemyUtils';
 import type {
+  AblativeShieldPlate,
   BossState,
   GameEvent,
   PlatformIsland,
   PlayerState,
   Projectile,
 } from '../engine/types';
-import { applyBossDamageToPlayer, stepBossCommonTimers } from './bossUtils';
+import {
+  applyBossDamageToPlayer,
+  BOSS_FIRE_ANIM_SEC,
+  nextBossProjectileId,
+  stepBossCommonTimers,
+} from './bossUtils';
 
 const MAXIMILIAN_BASE_RADIUS = 48;
 const MAXIMILIAN_BLADE_RADIUS = 72;
@@ -44,6 +50,159 @@ const MAXIMILIAN_TAUNTS = [
 ];
 
 let maximilianSeq = 0;
+let ablativePlateSeq = 0;
+
+const SAWBLADE_SPEED = 360;
+const SAWBLADE_RADIUS = 14;
+const SAWBLADE_DAMAGE = 22;
+const SAWBLADE_LIFE = 3.0;
+const SAWBLADE_COOLDOWN_NORMAL = 1.45;
+const SAWBLADE_COOLDOWN_WHIRLWIND = 0.95;
+
+/**
+ * Milestone 4.14: Builds multi-layer concentric rotating ablative shield plates
+ * orbiting Maximilian's chassis, scaling with sector index.
+ */
+export function createMaximilianAblativePlates(
+  x: number,
+  y: number,
+  sectorIndex = 0,
+): AblativeShieldPlate[] {
+  const safeSector = Math.max(0, Math.floor(sectorIndex));
+  const ringConfigs = [
+    { layer: 0, count: 4, orbitRadius: 80, radius: 15, hp: 45 + safeSector * 15 },
+    { layer: 1, count: 6, orbitRadius: 102, radius: 16, hp: 55 + safeSector * 15 },
+  ];
+  if (safeSector >= 2) {
+    ringConfigs.push({
+      layer: 2,
+      count: 6,
+      orbitRadius: 124,
+      radius: 16,
+      hp: 65 + safeSector * 15,
+    });
+  }
+
+  const plates: AblativeShieldPlate[] = [];
+  for (let r = 0; r < ringConfigs.length; r++) {
+    const cfg = ringConfigs[r];
+    for (let i = 0; i < cfg.count; i++) {
+      ablativePlateSeq += 1;
+      const angle = (i / cfg.count) * Math.PI * 2 + (cfg.layer % 2) * (Math.PI / cfg.count);
+      plates.push({
+        id: `max_plate_${ablativePlateSeq}`,
+        layer: cfg.layer,
+        angle,
+        orbitRadius: cfg.orbitRadius,
+        radius: cfg.radius,
+        hp: cfg.hp,
+        maxHp: cfg.hp,
+        hitFlash: 0,
+        x: x + Math.cos(angle) * cfg.orbitRadius,
+        y: y + Math.sin(angle) * cfg.orbitRadius,
+      });
+    }
+  }
+  return plates;
+}
+
+/**
+ * Milestone 4.14: Checks whether a player projectile hits one of Maximilian's
+ * orbiting ablative shield plates before reaching his core.
+ * Plates absorb shots, flash visibly, and shatter into cyan/crimson voxel shards
+ * when their individual HP reaches 0, opening firing lanes into the core.
+ */
+export function interceptProjectileWithAblativeShields(
+  boss: BossState,
+  proj: Projectile,
+  events: GameEvent[],
+): boolean {
+  if (boss.kind !== 'maximilian' || !boss.ablativePlates || boss.ablativePlates.length === 0) {
+    return false;
+  }
+  if ((boss.rezTimer ?? 0) > 0 || proj.life <= 0) return false;
+
+  for (let i = boss.ablativePlates.length - 1; i >= 0; i--) {
+    const plate = boss.ablativePlates[i];
+    if (plate.hp <= 0) continue;
+    const dx = proj.x - plate.x;
+    const dy = proj.y - plate.y;
+    const hitDist = plate.radius + proj.radius;
+    if (dx * dx + dy * dy > hitDist * hitDist) continue;
+
+    plate.hp -= proj.damage;
+    plate.hitFlash = 0.16;
+    boss.hitFlash = 0.08;
+    boss.hitFlashKind = 'shield';
+    events.push({ type: 'sfx', sound: 'electric_zap', x: plate.x, y: plate.y });
+    events.push({
+      type: 'vfx_explosion',
+      x: plate.x,
+      y: plate.y,
+      z: boss.z + 10,
+      color: '#22d3ee',
+      count: 6,
+    });
+
+    if (plate.hp <= 0) {
+      boss.ablativePlates.splice(i, 1);
+      events.push({ type: 'sfx', sound: 'shield_break', x: plate.x, y: plate.y });
+      events.push(
+        {
+          type: 'vfx_explosion',
+          x: plate.x,
+          y: plate.y,
+          z: boss.z + 12,
+          color: '#22d3ee',
+          count: 10,
+        },
+        {
+          type: 'vfx_explosion',
+          x: plate.x,
+          y: plate.y,
+          z: boss.z + 12,
+          color: '#f43f5e',
+          count: 10,
+        },
+      );
+    }
+
+    if (proj.modifiers.includes('pierce') && proj.bouncesLeft > 0) {
+      proj.bouncesLeft -= 1;
+    } else {
+      proj.life = 0;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function spawnThrownSawblade(
+  boss: BossState,
+  dirX: number,
+  dirY: number,
+): Projectile {
+  return {
+    id: nextBossProjectileId('max_sawblade'),
+    owner: 'boss',
+    kind: 'sawblade',
+    x: boss.x + dirX * (boss.radius + 14),
+    y: boss.y + dirY * (boss.radius + 14),
+    z: 14,
+    vx: dirX * SAWBLADE_SPEED,
+    vy: dirY * SAWBLADE_SPEED,
+    vz: 0,
+    radius: SAWBLADE_RADIUS,
+    damage: SAWBLADE_DAMAGE,
+    life: SAWBLADE_LIFE,
+    maxLife: SAWBLADE_LIFE,
+    bouncesLeft: 1,
+    modifiers: [],
+    color: '#f59e0b',
+    spinAngle: 0,
+  };
+}
 
 /**
  * Heavy / energy attacks punch through the 360° whirlwind guard. Standard bolts
@@ -71,7 +230,7 @@ export function isMaximilianVulnerable(boss: BossState): boolean {
   return boss.phase === 'recover' || (boss.shieldHp ?? 0) <= 0 || boss.vulnerable === true;
 }
 
-export function createMaximilian(x: number, y: number): BossState {
+export function createMaximilian(x: number, y: number, sectorIndex = 0): BossState {
   maximilianSeq += 1;
   return {
     id: `boss_maximilian_${maximilianSeq}`,
@@ -108,6 +267,8 @@ export function createMaximilian(x: number, y: number): BossState {
     shieldHp: MAXIMILIAN_SHIELD_HP,
     shieldMaxHp: MAXIMILIAN_SHIELD_HP,
     vulnerable: false,
+    sawbladeCooldown: 1.0,
+    ablativePlates: createMaximilianAblativePlates(x, y, sectorIndex),
     hitFlash: 0,
   };
 }
@@ -127,11 +288,12 @@ export function updateMaximilian(
   projectiles: Projectile[],
   dt: number,
   events: GameEvent[],
-): void {
-  if (dt <= 0 || boss.hp <= 0) return;
+): Projectile[] {
+  const spawned: Projectile[] = [];
+  if (dt <= 0 || boss.hp <= 0) return spawned;
 
   const common = stepBossCommonTimers(boss, dt, events);
-  if (common.rezzing) return;
+  if (common.rezzing) return spawned;
 
   const dx = player.x - boss.x;
   const dy = player.y - boss.y;
@@ -239,6 +401,34 @@ export function updateMaximilian(
     boss.angle = vectorToAngleDeg(dx, dy);
   }
 
+  // Milestone 4.14: Rotate concentric ablative shield plates around Maximilian's chassis
+  if (boss.ablativePlates && boss.ablativePlates.length > 0) {
+    for (let i = 0; i < boss.ablativePlates.length; i++) {
+      const plate = boss.ablativePlates[i];
+      const rotSpeed = plate.layer % 2 === 0 ? 1.35 : -1.05;
+      plate.angle = (plate.angle + rotSpeed * dt * common.speedMult) % (Math.PI * 2);
+      plate.x = boss.x + Math.cos(plate.angle) * plate.orbitRadius;
+      plate.y = boss.y + Math.sin(plate.angle) * plate.orbitRadius;
+      if (plate.hitFlash > 0) {
+        plate.hitFlash = Math.max(0, plate.hitFlash - dt);
+      }
+    }
+  }
+
+  // Milestone 4.14: Periodically hurl spinning voxel sawblades during stalk / charge / whirlwind
+  if (boss.phase === 'stalk' || boss.phase === 'charge' || boss.phase === 'whirlwind') {
+    boss.sawbladeCooldown = (boss.sawbladeCooldown ?? SAWBLADE_COOLDOWN_NORMAL) - dt * common.speedMult;
+    if (boss.sawbladeCooldown <= 0) {
+      boss.sawbladeCooldown =
+        boss.phase === 'whirlwind'
+          ? SAWBLADE_COOLDOWN_WHIRLWIND
+          : SAWBLADE_COOLDOWN_NORMAL;
+      boss.fireAnimTimer = BOSS_FIRE_ANIM_SEC;
+      spawned.push(spawnThrownSawblade(boss, dirX, dirY));
+      events.push({ type: 'sfx', sound: 'blade_whirr', x: boss.x, y: boss.y });
+    }
+  }
+
   // 1. Blade shredding is now phase- and attack-aware (Milestone 4 bugfix).
   //    recover: blades retracted -> fully vulnerable from every angle.
   //    stalk/charge: only the frontal ±75° arc shreds -> flanks/rear are safe.
@@ -331,4 +521,6 @@ export function updateMaximilian(
       events,
     );
   }
+
+  return spawned;
 }

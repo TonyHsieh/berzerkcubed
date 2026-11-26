@@ -5,7 +5,18 @@ import type { CameraState, GameEvent, Vec2 } from '../engine/types';
 /** World → screen projection bound to the current camera/viewport. */
 export type WorldToScreenFn = (wx: number, wy: number) => Vec2;
 
-type ParticleKind = 'debris' | 'flash' | 'shell' | 'crystal' | 'afterimage' | 'arc' | 'spark';
+type ParticleKind =
+  | 'debris'
+  | 'flash'
+  | 'shell'
+  | 'crystal'
+  | 'afterimage'
+  | 'arc'
+  | 'spark'
+  | 'ring'
+  | 'flame'
+  | 'smoke'
+  | 'sizzle';
 
 interface Particle {
   active: boolean;
@@ -136,12 +147,83 @@ export class VfxSystem {
     p.x = x; p.y = y; p.z = 0; p.angle = angleRad; p.size = 8; p.color = color;
   }
 
+  shockwave(x: number, y: number, z: number, radius: number, color = '#fb923c', rings = 1): void {
+    const count = Math.max(1, Math.min(4, Math.floor(rings)));
+    for (let i = 0; i < count; i++) {
+      const p = this.acquire('ring', 0.26 + i * 0.08);
+      if (!p) break;
+      p.x = x;
+      p.y = y;
+      p.z = z;
+      p.x2 = radius * (1 + i * 0.16);
+      p.size = 3.5 - i * 0.6;
+      p.color = i === 0 ? '#fef08a' : color;
+    }
+  }
+
+  flameSmoke(x: number, y: number, z = 10): void {
+    for (let i = 0; i < 2; i++) {
+      const fl = this.acquire('flame', 0.22 + Math.random() * 0.18);
+      if (!fl) break;
+      fl.x = x + (Math.random() - 0.5) * 14;
+      fl.y = y + (Math.random() - 0.5) * 14;
+      fl.z = z + Math.random() * 6;
+      fl.vx = (Math.random() - 0.5) * 28;
+      fl.vy = (Math.random() - 0.5) * 28;
+      fl.vz = 45 + Math.random() * 55;
+      fl.size = 3 + Math.random() * 3.5;
+      fl.color = Math.random() < 0.45 ? '#f97316' : '#ef4444';
+    }
+    const sm = this.acquire('smoke', 0.45 + Math.random() * 0.3);
+    if (sm) {
+      sm.x = x + (Math.random() - 0.5) * 10;
+      sm.y = y + (Math.random() - 0.5) * 10;
+      sm.z = z + 8;
+      sm.vx = (Math.random() - 0.5) * 18;
+      sm.vy = (Math.random() - 0.5) * 18;
+      sm.vz = 55 + Math.random() * 35;
+      sm.size = 4 + Math.random() * 4;
+      sm.color = '#94a3b8';
+    }
+  }
+
+  sizzle(x: number, y: number, z = 16): void {
+    const f = this.acquire('flash', 0.1);
+    if (f) {
+      f.x = x; f.y = y; f.z = z; f.size = 11; f.color = '#fef08a';
+    }
+    for (let i = 0; i < 4; i++) {
+      const s = this.acquire('sizzle', 0.18 + Math.random() * 0.16);
+      if (!s) break;
+      const a = Math.random() * Math.PI * 2;
+      const sp = 70 + Math.random() * 140;
+      s.x = x; s.y = y; s.z = z;
+      s.vx = Math.cos(a) * sp;
+      s.vy = Math.sin(a) * sp;
+      s.vz = 60 + Math.random() * 110;
+      s.size = 2 + Math.random() * 2;
+      s.color = i % 2 === 0 ? '#ffffff' : '#fb923c';
+    }
+  }
+
   // ---------- Events ----------
 
   handleEvent(event: GameEvent): void {
     switch (event.type) {
       case 'vfx_explosion':
         this.explode(event.x, event.y, event.z, event.color, event.count);
+        break;
+      case 'vfx_shockwave':
+        this.shockwave(event.x, event.y, event.z, event.radius, event.color, event.rings ?? 1);
+        break;
+      case 'vfx_lightning_arc':
+        this.lightningArc(event.x1, event.y1, event.x2, event.y2, event.color ?? '#67e8f9');
+        break;
+      case 'vfx_flame_smoke':
+        this.flameSmoke(event.x, event.y, event.z);
+        break;
+      case 'vfx_sizzle':
+        this.sizzle(event.x, event.y, event.z);
         break;
       case 'crate_destroyed':
         this.explode(event.x, event.y, 4, '#22d3ee', 18);
@@ -165,7 +247,7 @@ export class VfxSystem {
         this.release(i);
         continue;
       }
-      if (p.kind === 'debris' || p.kind === 'shell' || p.kind === 'crystal') {
+      if (p.kind === 'debris' || p.kind === 'shell' || p.kind === 'crystal' || p.kind === 'sizzle') {
         p.vz -= GRAVITY_Z * dt;
         p.x += p.vx * dt;
         p.y += p.vy * dt;
@@ -176,6 +258,10 @@ export class VfxSystem {
           p.vx *= 0.6;
           p.vy *= 0.6;
         }
+      } else if (p.kind === 'flame' || p.kind === 'smoke') {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.z += p.vz * dt;
       }
     }
   }
@@ -222,9 +308,9 @@ export class VfxSystem {
           const e = worldToScreen(p.x2, p.y2);
           ctx.globalAlpha = t;
           ctx.strokeStyle = p.color;
-          ctx.lineWidth = p.size;
+          ctx.lineWidth = p.size + 1.5;
           ctx.shadowColor = p.color;
-          ctx.shadowBlur = 10;
+          ctx.shadowBlur = 12;
           ctx.beginPath();
           ctx.moveTo(s.x, sy);
           const segs = 6;
@@ -235,6 +321,53 @@ export class VfxSystem {
           }
           ctx.lineTo(e.x, e.y - p.z * zScale);
           ctx.stroke();
+          // Bright white electric core
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = Math.max(1, p.size * 0.65);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          break;
+        }
+        case 'ring': {
+          const prog = 1 - t;
+          const r = Math.max(4, p.x2 * (0.18 + prog * 0.88));
+          ctx.globalAlpha = Math.min(1, t * 1.2);
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = Math.max(1.2, p.size * t);
+          ctx.shadowColor = p.color;
+          ctx.shadowBlur = 16;
+          ctx.beginPath();
+          ctx.arc(s.x, sy, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          break;
+        }
+        case 'flame': {
+          ctx.globalAlpha = Math.min(1, t * 1.3);
+          ctx.shadowColor = p.color;
+          ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.arc(s.x, sy, Math.max(1.5, p.size * t), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          break;
+        }
+        case 'smoke': {
+          ctx.save();
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = t * 0.45;
+          ctx.fillStyle = p.color;
+          ctx.beginPath();
+          ctx.arc(s.x, sy, p.size * (1.4 - t * 0.5), 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+          break;
+        }
+        case 'sizzle': {
+          ctx.globalAlpha = Math.min(1, t * 1.6);
+          ctx.shadowColor = '#fb923c';
+          ctx.shadowBlur = 8;
+          ctx.fillRect(s.x - p.size / 2, sy - p.size / 2, p.size, p.size);
           ctx.shadowBlur = 0;
           break;
         }

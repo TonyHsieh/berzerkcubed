@@ -26,8 +26,44 @@ const RECOVER_DURATION = 0.8;
 const STALK_SPEED = 110;
 const DASH_SPEED = 540;
 const MISSILE_RING_COUNT = 8;
-const MISSILE_SPEED = 155;
+export const ABB_ICBM_SPEED = 290;
+export const ABB_ICBM_TURN_RATE = 2.0; // rad/s capped angular turn rate (sweeping dodgeable arcs)
+export const ABB_ICBM_BLAST_RADIUS = 112;
 const CONTACT_DAMAGE = 28;
+
+/**
+ * Milestone 4.14: True guided steering for ABB ICBM missiles.
+ * Moves forward at high speed (`260–320 px/s`) while capping angular turn rate
+ * (`~1.8–2.4 rad/s`), carving wide sweeping dodgeable pursuit arcs.
+ */
+export function steerGuidedIcbm(
+  p: Projectile,
+  targetX: number,
+  targetY: number,
+  dt: number,
+): void {
+  if (dt <= 0) return;
+  p.targetX = targetX;
+  p.targetY = targetY;
+
+  const dx = targetX - p.x;
+  const dy = targetY - p.y;
+  if (dx * dx + dy * dy < 1e-6) return;
+
+  const curSpeed = Math.max(ABB_ICBM_SPEED, Math.hypot(p.vx, p.vy));
+  const curAngle = Math.atan2(p.vy, p.vx);
+  const desiredAngle = Math.atan2(dy, dx);
+  const diff = Math.atan2(
+    Math.sin(desiredAngle - curAngle),
+    Math.cos(desiredAngle - curAngle),
+  );
+  const maxStep = (p.turnRate ?? ABB_ICBM_TURN_RATE) * dt;
+  const clampedStep = Math.max(-maxStep, Math.min(maxStep, diff));
+  const nextAngle = curAngle + clampedStep;
+
+  p.vx = Math.cos(nextAngle) * curSpeed;
+  p.vy = Math.sin(nextAngle) * curSpeed;
+}
 
 let abbSeq = 0;
 
@@ -90,19 +126,22 @@ function spawnHomingMissileRing(
       id: nextBossProjectileId('abb_missile'),
       owner: 'boss',
       kind: 'homing_drone',
+      icbm: true,
+      turnRate: ABB_ICBM_TURN_RATE,
+      blastRadius: ABB_ICBM_BLAST_RADIUS,
       x: boss.x + Math.cos(theta) * (boss.radius * 0.75),
       y: boss.y + Math.sin(theta) * (boss.radius * 0.75),
       z: 18,
-      vx: Math.cos(theta) * MISSILE_SPEED,
-      vy: Math.sin(theta) * MISSILE_SPEED,
+      vx: Math.cos(theta) * ABB_ICBM_SPEED,
+      vy: Math.sin(theta) * ABB_ICBM_SPEED,
       vz: 0,
-      radius: 8,
-      damage: 20,
-      life: 4.8,
-      maxLife: 4.8,
+      radius: 10,
+      damage: 28,
+      life: 5.2,
+      maxLife: 5.2,
       bouncesLeft: 0,
       modifiers: [],
-      color: '#f97316',
+      color: '#e2e8f0',
       targetX: player.x,
       targetY: player.y,
     });

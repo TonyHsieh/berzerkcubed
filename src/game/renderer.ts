@@ -1055,6 +1055,30 @@ function drawBoss(
       ctx.fillText('VULNERABLE!', screenX, screenY - zLift - 52);
       ctx.restore();
     }
+
+    // Milestone 4.14: Multi-layer orbiting ablative shield plates around Maximilian
+    const plates = boss.ablativePlates ?? [];
+    for (let i = 0; i < plates.length; i++) {
+      const plate = plates[i];
+      if (plate.hp <= 0) continue;
+      const ps = project(plate.x, plate.y);
+      const hpFrac = Math.max(0.2, plate.hp / Math.max(1, plate.maxHp));
+      const plateScreenAngle = plate.angle + (camAngle * Math.PI) / 180;
+      const baseColor = plate.layer % 2 === 0 ? '#22d3ee' : '#f43f5e';
+      const activeColor = plate.hitFlash > 0 ? '#ffffff' : baseColor;
+      ctx.save();
+      ctx.translate(ps.x, ps.y - zLift - 12);
+      ctx.rotate(plateScreenAngle + Math.PI * 0.5);
+      ctx.shadowColor = activeColor;
+      ctx.shadowBlur = plate.hitFlash > 0 ? 18 : 10;
+      ctx.fillStyle = plate.hitFlash > 0 ? '#ffffff' : `rgba(15, 23, 42, 0.9)`;
+      ctx.fillRect(-13, -5, 26, 10);
+      ctx.strokeStyle = activeColor;
+      ctx.lineWidth = plate.hitFlash > 0 ? 3 : 2;
+      ctx.globalAlpha = 0.45 + hpFrac * 0.55;
+      ctx.strokeRect(-13, -5, 26, 10);
+      ctx.restore();
+    }
   } else if (boss.kind === 'recogniser') {
     // Milestone 4.11: 2-3x larger Recogniser with TWO distinct leg columns
     const scale = 5.0;
@@ -1171,7 +1195,8 @@ function drawBoss(
     );
     ctx.restore();
 
-    // Twin eye-laser telegraph targeting lines or active sweeping beams
+    // Milestone 4.14: Wall-clipped twin eye-laser telegraph lines & active beams with sizzle flare
+    const laserHits = boss.skullLaserHits;
     const sweepRad = boss.laserSweepAngle ?? 0;
     const camRad = (camAngle * Math.PI) / 180;
     const screenRad = sweepRad + camRad;
@@ -1184,28 +1209,76 @@ function drawBoss(
       ctx.strokeStyle = 'rgba(250, 204, 21, 0.75)';
       ctx.setLineDash([6, 6]);
       ctx.lineWidth = 2;
-      for (const side of [-1, 1]) {
-        const ox = screenX + perpX * side * 18;
-        const oy = screenY - zLift - 34 + perpY * side * 18;
-        ctx.beginPath();
-        ctx.moveTo(ox, oy);
-        ctx.lineTo(ox + dirX * 520, oy + dirY * 520);
-        ctx.stroke();
+      if (laserHits && laserHits.length > 0) {
+        for (let i = 0; i < laserHits.length; i++) {
+          const h = laserHits[i];
+          const p0 = project(h.startX, h.startY);
+          const p1 = project(h.endX, h.endY);
+          ctx.beginPath();
+          ctx.moveTo(p0.x, p0.y - zLift - 26);
+          ctx.lineTo(p1.x, p1.y - 18);
+          ctx.stroke();
+        }
+      } else {
+        for (const side of [-1, 1]) {
+          const ox = screenX + perpX * side * 18;
+          const oy = screenY - zLift - 34 + perpY * side * 18;
+          ctx.beginPath();
+          ctx.moveTo(ox, oy);
+          ctx.lineTo(ox + dirX * 520, oy + dirY * 520);
+          ctx.stroke();
+        }
       }
       ctx.restore();
     } else if ((boss.laserActiveTimer ?? 0) > 0) {
       ctx.save();
       ctx.shadowColor = '#f59e0b';
       ctx.shadowBlur = 18;
-      ctx.strokeStyle = '#fbbf24';
-      ctx.lineWidth = 6;
-      for (const side of [-1, 1]) {
-        const ox = screenX + perpX * side * 18;
-        const oy = screenY - zLift - 34 + perpY * side * 18;
-        ctx.beginPath();
-        ctx.moveTo(ox, oy);
-        ctx.lineTo(ox + dirX * 540, oy + dirY * 540);
-        ctx.stroke();
+      if (laserHits && laserHits.length > 0) {
+        for (let i = 0; i < laserHits.length; i++) {
+          const h = laserHits[i];
+          const p0 = project(h.startX, h.startY);
+          const p1 = project(h.endX, h.endY);
+          const y0 = p0.y - zLift - 26;
+          const y1 = p1.y - 18;
+          ctx.strokeStyle = '#f97316';
+          ctx.lineWidth = 7;
+          ctx.beginPath();
+          ctx.moveTo(p0.x, y0);
+          ctx.lineTo(p1.x, y1);
+          ctx.stroke();
+
+          ctx.strokeStyle = '#fef08a';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(p0.x, y0);
+          ctx.lineTo(p1.x, y1);
+          ctx.stroke();
+
+          // Molten sizzle impact flare at exact wall/door or hero contact point
+          if (h.hitWall || h.hitPlayer) {
+            const flareR = 7 + Math.sin(elapsedTime * 55 + i * 2) * 3;
+            ctx.fillStyle = '#fb923c';
+            ctx.beginPath();
+            ctx.arc(p1.x, y1, flareR + 4, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(p1.x, y1, flareR * 0.55, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      } else {
+        ctx.strokeStyle = '#fbbf24';
+        ctx.lineWidth = 6;
+        for (const side of [-1, 1]) {
+          const ox = screenX + perpX * side * 18;
+          const oy = screenY - zLift - 34 + perpY * side * 18;
+          ctx.beginPath();
+          ctx.moveTo(ox, oy);
+          ctx.lineTo(ox + dirX * 540, oy + dirY * 540);
+          ctx.stroke();
+        }
       }
       ctx.restore();
     }
@@ -1391,21 +1464,168 @@ function drawProjectile(
   screenX: number,
   screenY: number,
   zScale: number,
+  camAngleDeg = 0,
+  elapsedTime = 0,
 ): void {
   const sy = screenY - p.z * zScale;
+  const camRad = (camAngleDeg * Math.PI) / 180;
   ctx.save();
   ctx.fillStyle = p.color;
   ctx.shadowColor = p.color;
   ctx.shadowBlur = 10;
 
-  if (p.kind === 'beam_segment') {
-    const angle = Math.atan2(p.vy, p.vx);
+  if (p.kind === 'flame') {
+    // Milestone 4.14: Animated flickering fireball (white-hot core -> yellow -> orange -> crimson corona)
+    const flicker = 0.85 + 0.3 * Math.sin(elapsedTime * 48 + p.x * 0.2);
+    const r = Math.max(7, p.radius) * flicker;
+    const heading = Math.atan2(p.vy, p.vx) + camRad;
+    ctx.translate(screenX, sy);
+    ctx.rotate(heading);
+
+    // Trailing embers
+    ctx.shadowBlur = 6;
+    ctx.shadowColor = '#f97316';
+    for (let e = 0; e < 3; e++) {
+      const ex = -r * (1.1 + e * 0.55);
+      const ey = Math.sin(elapsedTime * 35 + e * 2.4 + p.y) * (r * 0.45);
+      ctx.fillStyle = e === 0 ? '#facc15' : '#ea580c';
+      ctx.fillRect(ex - 1.5, ey - 1.5, 3, 3);
+    }
+
+    // Jagged crimson outer flame corona
+    ctx.shadowColor = '#ef4444';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    const spikes = 9;
+    for (let k = 0; k < spikes * 2; k++) {
+      const a = (k * Math.PI) / spikes;
+      const rad = k % 2 === 0 ? r * (1.18 + 0.2 * Math.sin(elapsedTime * 60 + k)) : r * 0.72;
+      const px = Math.cos(a) * rad - (k % 2 === 0 ? 1.5 : 0);
+      const py = Math.sin(a) * rad;
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // Bright orange mid-flame
+    ctx.fillStyle = '#f97316';
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.72, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bright yellow inner flame
+    ctx.fillStyle = '#facc15';
+    ctx.beginPath();
+    ctx.arc(r * 0.1, 0, r * 0.48, 0, Math.PI * 2);
+    ctx.fill();
+
+    // White-hot core
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(r * 0.15, 0, r * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (p.kind === 'sawblade') {
+    // Milestone 4.14: Maximilian's spinning voxel sawblade
+    const spinRad = ((p.spinAngle ?? elapsedTime * 900) * Math.PI) / 180;
+    const r = Math.max(10, p.radius);
+    ctx.translate(screenX, sy);
+    ctx.rotate(spinRad);
+    ctx.shadowColor = '#f59e0b';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#e2e8f0';
+    ctx.beginPath();
+    const teeth = 8;
+    for (let k = 0; k < teeth * 2; k++) {
+      const a = (k * Math.PI) / teeth;
+      const rad = k % 2 === 0 ? r : r * 0.62;
+      const px = Math.cos(a) * rad;
+      const py = Math.sin(a) * rad;
+      if (k === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.32, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (p.kind === 'homing_drone' && p.icbm) {
+    // Milestone 4.14: ABB ICBM-style guided rocket rotated along velocity heading
+    const heading = Math.atan2(p.vy, p.vx) + camRad;
+    const thrust = 0.8 + 0.4 * Math.sin(elapsedTime * 55 + p.x);
+    ctx.translate(screenX, sy);
+    ctx.rotate(heading);
+
+    // Trailing exhaust smoke puffs behind tail
+    ctx.shadowBlur = 0;
+    for (let s = 0; s < 3; s++) {
+      ctx.fillStyle = `rgba(148, 163, 184, ${(0.5 - s * 0.14).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.arc(-18 - s * 7, Math.sin(elapsedTime * 22 + s * 2) * 2.5, 3.5 + s * 1.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Bright orange-yellow thruster flame
+    ctx.shadowColor = '#f97316';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#f97316';
+    ctx.beginPath();
+    ctx.moveTo(-11, -3.5);
+    ctx.lineTo(-11 - 12 * thrust, 0);
+    ctx.lineTo(-11, 3.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#fef08a';
+    ctx.beginPath();
+    ctx.moveTo(-11, -2);
+    ctx.lineTo(-11 - 7 * thrust, 0);
+    ctx.lineTo(-11, 2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Swept tail fins
+    ctx.shadowBlur = 4;
+    ctx.fillStyle = '#dc2626';
+    ctx.beginPath();
+    ctx.moveTo(-11, -4);
+    ctx.lineTo(-14, -9);
+    ctx.lineTo(-6, -4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-11, 4);
+    ctx.lineTo(-14, 9);
+    ctx.lineTo(-6, 4);
+    ctx.closePath();
+    ctx.fill();
+
+    // Elongated light-grey/white ICBM fuselage
+    ctx.fillStyle = '#e2e8f0';
+    ctx.fillRect(-11, -4, 18, 8);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-10, -2, 16, 2.5);
+
+    // Red warhead nosecone
+    ctx.fillStyle = '#ef4444';
+    ctx.beginPath();
+    ctx.moveTo(7, -4);
+    ctx.lineTo(15, 0);
+    ctx.lineTo(7, 4);
+    ctx.closePath();
+    ctx.fill();
+  } else if (p.kind === 'beam_segment') {
+    const angle = Math.atan2(p.vy, p.vx) + camRad;
     ctx.translate(screenX, sy);
     ctx.rotate(angle);
     ctx.fillRect(-p.radius * 2, -p.radius * 0.55, p.radius * 4, p.radius * 1.1);
   } else if (p.kind === 'electric_wave') {
     // Crackling ground-hugging brain-electricity arc
-    const angle = Math.atan2(p.vy, p.vx);
+    const angle = Math.atan2(p.vy, p.vx) + camRad;
     ctx.translate(screenX, sy);
     ctx.rotate(angle);
     ctx.strokeStyle = p.color;
@@ -1422,11 +1642,14 @@ function drawProjectile(
     ctx.stroke();
   } else if (p.kind === 'lightning') {
     ctx.strokeStyle = p.color;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.moveTo(screenX - p.vx * 0.025, sy - p.vy * 0.025);
     ctx.lineTo(screenX + 3, sy - 3);
     ctx.lineTo(screenX, sy);
+    ctx.stroke();
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.3;
     ctx.stroke();
   } else if (p.kind === 'mine') {
     ctx.strokeStyle = '#f43f5e';
@@ -1897,11 +2120,50 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
               );
             }
 
-            if (e.freezeTimer > 0) {
+            const chill = e.chillSlow ?? 0;
+            if (chill > 0 || e.freezeTimer > 0) {
+              const intensity = chill > 0 ? Math.min(1, 0.25 + chill * 0.95) : 0.45;
               c.save();
-              c.strokeStyle = '#67e8f9';
-              c.lineWidth = 1.5;
-              c.strokeRect(s.x - 10, s.y - 16, 20, 20);
+              c.fillStyle = `rgba(56, 189, 248, ${(intensity * 0.42).toFixed(2)})`;
+              c.shadowColor = '#38bdf8';
+              c.shadowBlur = 10 + intensity * 8;
+              c.beginPath();
+              c.ellipse(s.x, s.y - 10, e.radius + 3, e.radius + 6, 0, 0, Math.PI * 2);
+              c.fill();
+              c.strokeStyle = `rgba(165, 243, 252, ${intensity.toFixed(2)})`;
+              c.lineWidth = 1.5 + intensity;
+              c.stroke();
+              c.restore();
+            }
+
+            if ((e.burnTimer ?? 0) > 0) {
+              const flicker = 0.7 + 0.3 * Math.sin(state.elapsedTime * 40 + e.x);
+              c.save();
+              c.shadowColor = '#f97316';
+              c.shadowBlur = 12;
+              c.fillStyle = 'rgba(239, 68, 68, 0.65)';
+              c.beginPath();
+              c.arc(s.x, s.y - 14, (e.radius * 0.75) * flicker, 0, Math.PI * 2);
+              c.fill();
+              c.fillStyle = 'rgba(250, 204, 21, 0.85)';
+              c.beginPath();
+              c.arc(s.x, s.y - 16, (e.radius * 0.42) * flicker, 0, Math.PI * 2);
+              c.fill();
+              c.restore();
+            }
+
+            if ((e.lightningFlashTimer ?? 0) > 0) {
+              const alpha = Math.min(1, (e.lightningFlashTimer ?? 0) / 0.16);
+              c.save();
+              c.shadowColor = '#38bdf8';
+              c.shadowBlur = 18;
+              c.fillStyle = `rgba(255, 255, 255, ${(alpha * 0.78).toFixed(2)})`;
+              c.beginPath();
+              c.ellipse(s.x, s.y - 10, e.radius + 4, e.radius + 7, 0, 0, Math.PI * 2);
+              c.fill();
+              c.strokeStyle = `rgba(56, 189, 248, ${alpha.toFixed(2)})`;
+              c.lineWidth = 2.5;
+              c.stroke();
               c.restore();
             }
           },
@@ -2045,7 +2307,7 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
           const s = project(p.x, p.y);
           renderQueue.push({
             sortY: s.y,
-            draw: (c) => drawProjectile(c, p, s.x, s.y, zScale),
+            draw: (c) => drawProjectile(c, p, s.x, s.y, zScale, camAngle, state.elapsedTime),
           });
         }
       };

@@ -5,7 +5,9 @@ import type {
   PlayerState,
 } from '../engine/types';
 import {
+  getChillSpeedMultiplier,
   hashToUnit,
+  recoverChillSlow,
   resolveEnemyAgainstIsland,
   vectorToAngleDeg,
 } from './enemyUtils';
@@ -25,7 +27,6 @@ export interface SpatialQueryGrid<
 export const ENFORCER_RADIUS = 13;
 export const VBOT_MELEE_RADIUS = 12;
 const VBOT_MELEE_SPEED_MULT = 1.3;
-const FROZEN_SPEED_MULT = 0.35;
 const SEPARATION_WEIGHT = 1.65;
 const STEER_RESPONSIVENESS = 10;
 
@@ -129,15 +130,21 @@ export function updateEnforcers(
     if (enemy.hitFlash > 0) {
       enemy.hitFlash = Math.max(0, enemy.hitFlash - dt);
     }
+    if ((enemy.lightningFlashTimer ?? 0) > 0) {
+      enemy.lightningFlashTimer = Math.max(0, (enemy.lightningFlashTimer ?? 0) - dt);
+    }
 
     const isFrozen = enemy.freezeTimer > 0;
     if (isFrozen) {
       enemy.freezeTimer = Math.max(0, enemy.freezeTimer - dt);
     }
+    if ((enemy.chillSlow ?? 0) > 0) {
+      recoverChillSlow(enemy, dt);
+    }
 
+    const chillMult = getChillSpeedMultiplier(enemy);
     const kindMult = enemy.kind === 'v_bot_melee' ? VBOT_MELEE_SPEED_MULT : 1;
-    const effectiveSpeed =
-      config.enforcerSpeed * kindMult * (isFrozen ? FROZEN_SPEED_MULT : 1);
+    const effectiveSpeed = config.enforcerSpeed * kindMult * chillMult;
 
     // 1. Seek vector toward player with subtle per-enemy flanking angle at mid/far range
     const toPlayerX = player.x - enemy.x;

@@ -234,7 +234,8 @@ export interface Projectile {
     | 'mine'
     | 'sky_bomb'
     | 'homing_drone'
-    | 'electric_wave';
+    | 'electric_wave'
+    | 'sawblade';
   x: number;
   y: number;
   z: number;
@@ -250,6 +251,12 @@ export interface Projectile {
   color: string;
   targetX?: number;
   targetY?: number;
+  /** Milestone 4.14: ABB guided ICBM missile flag + capped turn rate + blast radius. */
+  icbm?: boolean;
+  turnRate?: number;
+  blastRadius?: number;
+  /** Milestone 4.14: visual spin angle (deg) for thrown sawblades. */
+  spinAngle?: number;
 }
 
 // ---------- Enemies & Bosses ----------
@@ -285,6 +292,13 @@ export interface EnemyState {
   rezDuration?: number;
   /** Milestone 4.12: brief post-rez fading flash halo countdown (0.15s). */
   rezHaloTimer?: number;
+  /** Milestone 4.14: flamethrower burning status countdown & periodic DOT accumulator. */
+  burnTimer?: number;
+  burnTickTimer?: number;
+  /** Milestone 4.14: cumulative freeze slow fraction (0..0.85), +0.02/hit, -0.01/sec recovery. */
+  chillSlow?: number;
+  /** Milestone 4.14: electric white/blue flash timer (0.16s) when struck/chained by lightning. */
+  lightningFlashTimer?: number;
 }
 
 export type BossKind =
@@ -310,6 +324,30 @@ export interface OrbitingBugBot {
   vx: number;
   vy: number;
   swoopTimer: number;
+}
+
+/** Milestone 4.14: Maximilian's multi-layer rotating ablative shield plate. */
+export interface AblativeShieldPlate {
+  id: string;
+  layer: number;
+  angle: number;
+  orbitRadius: number;
+  radius: number;
+  hp: number;
+  maxHp: number;
+  hitFlash: number;
+  x: number;
+  y: number;
+}
+
+/** Milestone 4.14: Raycasted eye-laser segment for Floating Skullhead. */
+export interface SkullLaserBeam {
+  startX: number;
+  startY: number;
+  endX: number;
+  endY: number;
+  hitWall: boolean;
+  hitPlayer: boolean;
 }
 
 export interface BossPart {
@@ -379,6 +417,16 @@ export interface BossState {
   laserActiveTimer?: number;
   laserSweepAngle?: number;
   laserSweepDir?: number;
+  /** Milestone 4.14: wall-clipped twin eye-laser endpoints for rendering & sizzle impacts. */
+  skullLaserHits?: SkullLaserBeam[];
+  // Maximilian Milestone 4.14: thrown sawblade cooldown & layered ablative shield plates
+  sawbladeCooldown?: number;
+  ablativePlates?: AblativeShieldPlate[];
+  // Milestone 4.14: elemental statuses on bosses
+  chillSlow?: number;
+  burnTimer?: number;
+  burnTickTimer?: number;
+  lightningFlashTimer?: number;
   // Bug Hive orbiting bug-bot shield
   orbitingBugs?: OrbitingBugBot[];
   hitFlash: number;
@@ -392,6 +440,10 @@ export type GameEvent =
   | { type: 'sfx'; sound: string; x?: number; y?: number }
   | { type: 'voice_taunt'; text: string; pitch: number; rate: number; speaker: string }
   | { type: 'vfx_explosion'; x: number; y: number; z: number; color: string; count: number }
+  | { type: 'vfx_shockwave'; x: number; y: number; z: number; radius: number; color: string; rings?: number }
+  | { type: 'vfx_lightning_arc'; x1: number; y1: number; x2: number; y2: number; color?: string }
+  | { type: 'vfx_flame_smoke'; x: number; y: number; z: number }
+  | { type: 'vfx_sizzle'; x: number; y: number; z: number }
   | { type: 'camera_shake'; magnitude: number; duration: number }
   | { type: 'crate_destroyed'; x: number; y: number }
   | { type: 'player_fell'; x: number; y: number };

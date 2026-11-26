@@ -1,3 +1,4 @@
+import { getChillSpeedMultiplier, recoverChillSlow } from '../enemies/enemyUtils';
 import type { BossState, GameEvent, PlayerState } from '../engine/types';
 
 export const BOSS_REZ_DURATION = 1.0;
@@ -68,6 +69,12 @@ export function stepBossCommonTimers(
   if ((boss.fireAnimTimer ?? 0) > 0) {
     boss.fireAnimTimer = Math.max(0, (boss.fireAnimTimer ?? 0) - dt);
   }
+  if ((boss.lightningFlashTimer ?? 0) > 0) {
+    boss.lightningFlashTimer = Math.max(0, (boss.lightningFlashTimer ?? 0) - dt);
+  }
+  if ((boss.chillSlow ?? 0) > 0) {
+    recoverChillSlow(boss, dt);
+  }
 
   // TRON Rez-In materialization: invulnerable, stationary, cannot attack
   if ((boss.rezTimer ?? 0) > 0) {
@@ -107,10 +114,11 @@ export function stepBossCommonTimers(
   }
 
   const rampaging = (boss.rampageTimer ?? 0) > 0;
+  const chillMult = getChillSpeedMultiplier(boss);
   return {
     rezzing: false,
     rampaging,
-    speedMult: rampaging ? 1.45 : 1.0,
+    speedMult: (rampaging ? 1.45 : 1.0) * chillMult,
   };
 }
 

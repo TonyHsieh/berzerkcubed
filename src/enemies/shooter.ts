@@ -7,7 +7,9 @@ import type {
   Projectile,
 } from '../engine/types';
 import {
+  getChillSpeedMultiplier,
   hashToUnit,
+  recoverChillSlow,
   resolveEnemyAgainstIsland,
   vectorToAngleDeg,
 } from './enemyUtils';
@@ -36,7 +38,6 @@ const GRENADIER_FIRE_RANGE = 520;
 const GRENADIER_TELEGRAPH_SEC = 0.45;
 const GRENADIER_COOLDOWN_SEC = 2.4;
 
-const FROZEN_SPEED_MULT = 0.35;
 const FROZEN_RATE_MULT = 0.5;
 
 let projectileSeq = 0;
@@ -186,16 +187,23 @@ export function updateRangedEnemies(
     if ((enemy.fireAnimTimer ?? 0) > 0) {
       enemy.fireAnimTimer = Math.max(0, (enemy.fireAnimTimer ?? 0) - dt);
     }
+    if ((enemy.lightningFlashTimer ?? 0) > 0) {
+      enemy.lightningFlashTimer = Math.max(0, (enemy.lightningFlashTimer ?? 0) - dt);
+    }
 
     const isFrozen = enemy.freezeTimer > 0;
     if (isFrozen) {
       enemy.freezeTimer = Math.max(0, enemy.freezeTimer - dt);
     }
+    if ((enemy.chillSlow ?? 0) > 0) {
+      recoverChillSlow(enemy, dt);
+    }
 
-    const rateScale = isFrozen ? FROZEN_RATE_MULT : 1;
+    const chillMult = getChillSpeedMultiplier(enemy);
+    const rateScale = isFrozen || (enemy.chillSlow ?? 0) > 0 ? Math.max(FROZEN_RATE_MULT, chillMult) : 1;
     const isVBotLaser = enemy.kind === 'v_bot_laser';
     const speedMult = isVBotLaser ? 1.18 : 1;
-    const moveSpeed = baseMoveSpeed * speedMult * (isFrozen ? FROZEN_SPEED_MULT : 1);
+    const moveSpeed = baseMoveSpeed * speedMult * chillMult;
 
     const dx = player.x - enemy.x;
     const dy = player.y - enemy.y;

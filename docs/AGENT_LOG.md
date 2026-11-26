@@ -215,3 +215,23 @@ Spec: `docs/specs/milestone-4.13-tweaks.md`.
 - **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
   - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed, built in 2.41s).
   - `pnpm test` (`vitest run`): **PASSED** — **15 test files passed (15), 111 tests passed (111)** (all 108 prior tests + 3 new Milestone 4.13 tests).
+
+---
+
+## Milestone 4.14 — Explosive Grenades, Boss Combat Upgrades & Elemental Weapon Overhaul (`main`)
+- **Files modified**:
+  - `src/engine/types.ts` — added `'sawblade'` projectile kind, ICBM fields (`icbm`, `turnRate`, `blastRadius`, `spinAngle`), `AblativeShieldPlate`, `SkullLaserBeam`, elemental status fields (`burnTimer`, `burnTickTimer`, `chillSlow`, `lightningFlashTimer`), and VFX event variants (`vfx_shockwave`, `vfx_lightning_arc`, `vfx_flame_smoke`, `vfx_sizzle`).
+  - `src/world/worldSim.ts` — exported `raycastSolidWalls` and `RaycastHit` for exact ray-vs-AABB intersection against solid walls and closed sliding doors.
+  - `src/enemies/enemyUtils.ts`, `src/enemies/enforcer.ts`, `src/enemies/shooter.ts` — exported `FREEZE_HIT_SLOW` (`0.02`), `FREEZE_MAX_SLOW` (`0.85`), `FREEZE_RECOVERY_PER_SEC` (`0.01`), `applyFreezeHit`, `recoverChillSlow`, `getChillSpeedMultiplier`; scaled enemy movement by `(1 - chillSlow)` and decayed `lightningFlashTimer`.
+  - `src/bosses/bossUtils.ts` — stepped `chillSlow` recovery and `lightningFlashTimer` decay in `stepBossCommonTimers`.
+  - `src/bosses/maximilian.ts` — exported `createMaximilianAblativePlates`, `interceptProjectileWithAblativeShields`; added sector-scaled concentric rotating ablative shield plates and periodic thrown spinning `'sawblade'` projectiles during `stalk`/`charge`/`whirlwind`.
+  - `src/bosses/abb.ts` — exported `ABB_ICBM_SPEED` (`290`), `ABB_ICBM_TURN_RATE` (`2.0`), `ABB_ICBM_BLAST_RADIUS` (`112`), `steerGuidedIcbm`; radial 360° ICBM launches with capped angular turn rate.
+  - `src/bosses/skullhead.ts` — exported `computeSkullheadEyeLasers`; raycasted twin eye lasers against solid walls, closed doors, and hero with continuous sizzle-explosion events at impact points.
+  - `src/game/gameState.ts` — exported `GRENADE_BLAST_RADIUS` (`96`), `LIGHTNING_CHAIN_RADIUS` (`130`), `LIGHTNING_FLASH_SEC` (`0.16`), `BURN_DURATION_SEC` (`3.0`), `triggerLightningChain`; wired grenade detonation on landing/wall/enemy/crate/boss/expiry, Maximilian sawblade wall sparks/crate shredding + ablative shield interception, ABB ICBM steering + massive world-shaking explosions (shake mag 16, 0.36s, multi-ring shockwave), Skullhead wall-blocked lasers, and elemental Flamethrower DOT/Freeze slow/Lightning `2 * level` chain-jumping.
+  - `src/render/vfx.ts` — added `shockwave`, `flameSmoke`, `sizzle` emitters and `'ring'`, `'flame'`, `'smoke'`, `'sizzle'` pooled particles plus white-core electric lightning arcs.
+  - `src/game/renderer.ts` — rendered animated flickering fireballs, burning flame overlays, chilled icy-blue glow scaling with `chillSlow`, white/blue lightning flashes, Maximilian ablative shield plates + spinning sawblades, ABB ICBM rockets (fuselage/red nosecone/fins/thruster/smoke), and wall-clipped Skullhead eye beams with molten sizzle impact flares.
+- **Files created**:
+  - `src/game/milestone414.test.ts` — 11 headless Vitest unit & integration tests covering all 9 verification gate items plus VFX event rendering.
+- **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed).
+  - `pnpm test` (`vitest run`): **PASSED** — **16 test files passed (16), 122 tests passed (122)** (111 prior + 11 new).
