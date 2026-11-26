@@ -6,6 +6,10 @@ export interface HudCallbacks {
   onSpawnBoss?: (kind: BossKind) => void;
   onNextSector?: () => void;
   onRestart?: () => void;
+  onResume?: () => void;
+  onOpenGallery?: () => void;
+  onQuitToTitle?: () => void;
+  onStartGame?: () => void;
   onToggleCrt?: (enabled: boolean) => void;
   onToggleMute?: (muted: boolean) => void;
   onToggleBass?: (enabled: boolean) => void;
@@ -178,6 +182,69 @@ export function createHud(
   `;
   container.appendChild(tuningPanel);
 
+  // Milestone 4.15: Evil Otto Alarm Countdown Banner (top-center)
+  const ottoAlarmBanner = document.createElement('div');
+  ottoAlarmBanner.id = 'hud-otto-alarm-banner';
+  ottoAlarmBanner.style.cssText =
+    'position:absolute;top:14px;left:50%;transform:translateX(-50%);width:460px;max-width:90vw;background:rgba(30,6,12,0.92);border:2px solid #ef4444;padding:10px 14px;display:none;text-align:center;box-shadow:0 0 24px rgba(239,68,68,0.65);z-index:20;';
+  ottoAlarmBanner.innerHTML = `
+    <div style="font-size:13px;font-weight:bold;color:#fef08a;letter-spacing:2px;text-shadow:0 0 10px #ef4444;display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <span>⚠ EVIL OTTO APPROACHING — EXIT NOW!</span>
+      <span id="hud-otto-timer" style="color:#f87171;font-size:14px;">41.0s</span>
+    </div>
+    <div style="height:8px;background:#1f0a10;border:1px solid #f59e0b;overflow:hidden;">
+      <div id="hud-otto-bar" style="height:100%;width:100%;background:linear-gradient(90deg,#ef4444,#f59e0b);transition:width 80ms linear;"></div>
+    </div>
+  `;
+  container.appendChild(ottoAlarmBanner);
+
+  // Milestone 4.15: Escape Pause Menu Modal
+  const pauseModal = document.createElement('div');
+  pauseModal.id = 'hud-pause-modal';
+  pauseModal.style.cssText =
+    'position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(5,7,13,0.78);backdrop-filter:blur(3px);pointer-events:auto;z-index:40;';
+  pauseModal.innerHTML = `
+    <div style="width:340px;max-width:90vw;text-align:center;border:2px solid #22d3ee;background:rgba(7,11,22,0.96);padding:26px 28px;box-shadow:0 0 32px rgba(34,211,238,0.4);">
+      <div style="font-size:26px;font-weight:bold;color:#22d3ee;letter-spacing:6px;text-shadow:0 0 14px #22d3ee;margin-bottom:6px;">PAUSED</div>
+      <div style="font-size:10px;color:#94a3b8;letter-spacing:2px;margin-bottom:18px;">USE ↑/↓ + ENTER OR CLICK</div>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button id="pause-resume" data-pause-idx="0" style="background:#0f172a;color:#e2e8f0;border:1px solid #38bdf8;padding:10px 14px;font:inherit;font-size:13px;letter-spacing:2px;cursor:pointer;">RESUME [ESC]</button>
+        <button id="pause-restart" data-pause-idx="1" style="background:#0f172a;color:#e2e8f0;border:1px solid #38bdf8;padding:10px 14px;font:inherit;font-size:13px;letter-spacing:2px;cursor:pointer;">RESTART RUN</button>
+        <button id="pause-gallery" data-pause-idx="2" style="background:#0f172a;color:#e2e8f0;border:1px solid #38bdf8;padding:10px 14px;font:inherit;font-size:13px;letter-spacing:2px;cursor:pointer;">MODEL GALLERY</button>
+        <button id="pause-quit" data-pause-idx="3" style="background:#0f172a;color:#fca5a5;border:1px solid #ef4444;padding:10px 14px;font:inherit;font-size:13px;letter-spacing:2px;cursor:pointer;">QUIT TO TITLE SCREEN</button>
+      </div>
+    </div>
+  `;
+  container.appendChild(pauseModal);
+
+  // Milestone 4.15: Arcade Title Screen Overlay
+  const titleScreen = document.createElement('div');
+  titleScreen.id = 'hud-title-screen';
+  titleScreen.style.cssText =
+    'position:absolute;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;background:radial-gradient(circle at center,rgba(5,7,13,0.35),rgba(5,7,13,0.82));pointer-events:auto;z-index:50;text-align:center;padding:24px;';
+  titleScreen.innerHTML = `
+    <style>
+      @keyframes berzerkPulse {
+        0%, 100% { opacity: 1; transform: scale(1); text-shadow: 0 0 18px #facc15, 0 0 32px #f59e0b; }
+        50% { opacity: 0.45; transform: scale(0.98); text-shadow: 0 0 8px #facc15; }
+      }
+    </style>
+    <div style="font-size:12px;color:#38bdf8;letter-spacing:6px;margin-bottom:10px;text-shadow:0 0 10px #38bdf8;">CYBER-ARCADE TWIN-STICK SHOOTER</div>
+    <div style="font-size:clamp(48px,8vw,86px);font-weight:900;color:#22d3ee;letter-spacing:8px;text-shadow:0 0 24px #22d3ee,0 0 48px rgba(34,211,238,0.55),0 4px 0 #0c4a6e;line-height:1.05;margin-bottom:12px;">BERZERK³</div>
+    <div style="font-size:13px;color:#f43f5e;letter-spacing:4px;margin-bottom:34px;text-shadow:0 0 12px rgba(244,63,94,0.6);">INTRUDER ALERT // SURVIVE THE MAZE</div>
+    <div style="font-size:18px;font-weight:bold;color:#facc15;letter-spacing:4px;margin-bottom:36px;animation:berzerkPulse 1.3s ease-in-out infinite;cursor:pointer;" id="title-start-prompt">PRESS ANY BUTTON TO START</div>
+    <div style="max-width:720px;background:rgba(5,10,20,0.82);border:1px solid rgba(34,211,238,0.45);padding:12px 18px;font-size:11px;color:#cbd5e1;line-height:1.8;letter-spacing:0.6px;box-shadow:0 0 20px rgba(34,211,238,0.18);">
+      <span style="color:#38bdf8;">WASD / Left Stick</span> Move &nbsp;·&nbsp;
+      <span style="color:#38bdf8;">Mouse / Right Stick</span> Aim &amp; Shoot &nbsp;·&nbsp;
+      <span style="color:#facc15;">SPACE / LT</span> Dodge-Roll<br/>
+      <span style="color:#38bdf8;">1–3 / LB/RB</span> Weapons &nbsp;·&nbsp;
+      <span style="color:#38bdf8;">F / X</span> Swap &nbsp;·&nbsp;
+      <span style="color:#38bdf8;">Q / E</span> Swivel &nbsp;·&nbsp;
+      <span style="color:#f43f5e;">ESC / Start</span> Pause
+    </div>
+  `;
+  container.appendChild(titleScreen);
+
   // Game Over Overlay
   const gameOverBox = document.createElement('div');
   gameOverBox.style.cssText =
@@ -242,9 +309,58 @@ export function createHud(
   const spawnBrainbotBtn = $<HTMLButtonElement>('spawn-brainbot');
   const finalScoreEl = $<HTMLDivElement>('hud-final-score');
   const restartBtn = $<HTMLButtonElement>('hud-restart');
+  const ottoTimerEl = $<HTMLSpanElement>('hud-otto-timer');
+  const ottoBarEl = $<HTMLDivElement>('hud-otto-bar');
+  const pauseResumeBtn = $<HTMLButtonElement>('pause-resume');
+  const pauseRestartBtn = $<HTMLButtonElement>('pause-restart');
+  const pauseGalleryBtn = $<HTMLButtonElement>('pause-gallery');
+  const pauseQuitBtn = $<HTMLButtonElement>('pause-quit');
+  const pauseButtons = [pauseResumeBtn, pauseRestartBtn, pauseGalleryBtn, pauseQuitBtn];
 
   let tuningOpen = false;
   let boundState: GameState | null = null;
+  let pauseSelection = 0;
+
+  const updatePauseFocusStyles = () => {
+    for (let i = 0; i < pauseButtons.length; i++) {
+      const btn = pauseButtons[i];
+      const selected = i === pauseSelection;
+      const isQuit = i === 3;
+      btn.style.background = selected
+        ? isQuit
+          ? '#7f1d1d'
+          : '#0e7490'
+        : '#0f172a';
+      btn.style.boxShadow = selected
+        ? isQuit
+          ? '0 0 14px rgba(239,68,68,0.65)'
+          : '0 0 14px rgba(34,211,238,0.65)'
+        : 'none';
+      btn.style.color = selected ? '#ffffff' : isQuit ? '#fca5a5' : '#e2e8f0';
+    }
+  };
+  updatePauseFocusStyles();
+
+  const triggerPauseAction = (idx: number) => {
+    if (idx === 0) callbacks.onResume?.();
+    else if (idx === 1) callbacks.onRestart?.();
+    else if (idx === 2) callbacks.onOpenGallery?.();
+    else if (idx === 3) callbacks.onQuitToTitle?.();
+  };
+
+  pauseButtons.forEach((btn, idx) => {
+    btn.addEventListener('mouseenter', () => {
+      pauseSelection = idx;
+      updatePauseFocusStyles();
+    });
+    btn.addEventListener('click', () => triggerPauseAction(idx));
+  });
+
+  titleScreen.addEventListener('pointerdown', () => {
+    if (boundState?.phase === 'title') {
+      callbacks.onStartGame?.();
+    }
+  });
 
   const setTuningOpen = (open: boolean) => {
     tuningOpen = open;
@@ -252,7 +368,26 @@ export function createHud(
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (e.code === 'Tab') {
+    if (boundState?.phase === 'paused') {
+      if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+        e.preventDefault();
+        pauseSelection = (pauseSelection + pauseButtons.length - 1) % pauseButtons.length;
+        updatePauseFocusStyles();
+        return;
+      }
+      if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+        e.preventDefault();
+        pauseSelection = (pauseSelection + 1) % pauseButtons.length;
+        updatePauseFocusStyles();
+        return;
+      }
+      if (e.code === 'Enter' || e.code === 'Space') {
+        e.preventDefault();
+        triggerPauseAction(pauseSelection);
+        return;
+      }
+    }
+    if (e.code === 'Tab' && boundState?.phase === 'playing') {
       e.preventDefault();
       setTuningOpen(!tuningOpen);
     }
@@ -295,6 +430,24 @@ export function createHud(
   return {
     update(state: GameState): void {
       boundState = state;
+      const onTitle = state.phase === 'title';
+      const isPaused = state.phase === 'paused';
+
+      titleScreen.style.display = onTitle ? 'flex' : 'none';
+      pauseModal.style.display = isPaused ? 'flex' : 'none';
+      vitals.style.display = onTitle ? 'none' : 'block';
+      topRight.style.display = onTitle ? 'none' : 'block';
+      weaponBox.style.display = onTitle ? 'none' : 'block';
+
+      if (onTitle) {
+        bossBox.style.display = 'none';
+        ottoAlarmBanner.style.display = 'none';
+        toastContainer.style.display = 'none';
+        gameOverBox.style.display = 'none';
+        tuningPanel.style.display = 'none';
+        return;
+      }
+
       const p = state.player;
       livesEl.textContent = `LIVES: ${p.lives}`;
       shieldValEl.textContent = `${Math.ceil(p.shield)}/${p.maxShield}`;
@@ -355,6 +508,20 @@ export function createHud(
       enemiesEl.textContent = String(state.enemies.length);
 
       ottoWarnEl.style.display = state.ottoWarningActive ? 'block' : 'none';
+      const showAlarmBanner =
+        state.ottoWarningActive && !state.ottoSpawned && !state.gameOver && !state.boss;
+      if (showAlarmBanner) {
+        ottoAlarmBanner.style.display = 'block';
+        const rem = Math.max(0, state.ottoAlarmRemainingSec ?? 0);
+        const total = Math.max(1, state.ottoAlarmDurationSec ?? 1);
+        const pct = Math.max(0, Math.min(100, (rem / total) * 100));
+        ottoTimerEl.textContent = `${rem.toFixed(1)}s`;
+        ottoBarEl.style.width = `${pct.toFixed(1)}%`;
+        const flash = Math.sin(state.elapsedTime * 12) > 0;
+        ottoAlarmBanner.style.borderColor = flash ? '#ef4444' : '#f59e0b';
+      } else {
+        ottoAlarmBanner.style.display = 'none';
+      }
       exitHintEl.style.display =
         state.bossDefeated && !state.gameOver && !state.roomTransition
           ? 'block'

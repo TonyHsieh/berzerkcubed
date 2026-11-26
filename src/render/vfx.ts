@@ -14,6 +14,8 @@ type ParticleKind =
   | 'arc'
   | 'spark'
   | 'ring'
+  | 'implode_ring'
+  | 'implode_spark'
   | 'flame'
   | 'smoke'
   | 'sizzle';
@@ -206,12 +208,101 @@ export class VfxSystem {
     }
   }
 
+  /**
+   * Milestone 4.15: Distinct smaller timeout implosion — shrinking neon ring
+   * plus inward-collapsing particles so no projectile ever vanishes silently.
+   */
+  implode(x: number, y: number, z: number, color: string, radius = 14): void {
+    const safeRadius = Math.max(6, radius);
+    const ring = this.acquire('implode_ring', 0.2);
+    if (ring) {
+      ring.x = x;
+      ring.y = y;
+      ring.z = z;
+      ring.x2 = safeRadius;
+      ring.size = 2.4;
+      ring.color = color;
+    }
+    const count = 6;
+    for (let i = 0; i < count; i++) {
+      const life = 0.16 + Math.random() * 0.08;
+      const sp = this.acquire('implode_spark', life);
+      if (!sp) break;
+      const a = (i / count) * Math.PI * 2 + Math.random() * 0.4;
+      const dist = safeRadius * (0.85 + Math.random() * 0.35);
+      sp.x = x + Math.cos(a) * dist;
+      sp.y = y + Math.sin(a) * dist;
+      sp.z = z;
+      // Velocity directed inward toward (x, y)
+      sp.vx = (-Math.cos(a) * dist) / life;
+      sp.vy = (-Math.sin(a) * dist) / life;
+      sp.vz = 0;
+      sp.size = 2;
+      sp.color = i % 2 === 0 ? color : '#ffffff';
+    }
+  }
+
+  /**
+   * Milestone 4.15: Vivid Tesla/lightning electric detonation — bright white/cyan
+   * core flash + 5-8 radiating jagged micro-lightning tendrils + blue/white sparks.
+   */
+  electricDetonation(x: number, y: number, z = 8, color = '#67e8f9', tendrils = 6): void {
+    const core = this.acquire('flash', 0.16);
+    if (core) {
+      core.x = x;
+      core.y = y;
+      core.z = z;
+      core.size = 18;
+      core.color = '#ffffff';
+    }
+    const halo = this.acquire('flash', 0.2);
+    if (halo) {
+      halo.x = x;
+      halo.y = y;
+      halo.z = z;
+      halo.size = 24;
+      halo.color = color;
+    }
+    const count = Math.max(5, Math.min(8, Math.floor(tendrils)));
+    for (let t = 0; t < count; t++) {
+      const angle = (t / count) * Math.PI * 2 + Math.random() * 0.45;
+      const len = 24 + Math.random() * 20;
+      this.lightningArc(
+        x,
+        y,
+        x + Math.cos(angle) * len,
+        y + Math.sin(angle) * len,
+        t % 2 === 0 ? '#ffffff' : color,
+      );
+    }
+    for (let i = 0; i < 10; i++) {
+      const p = this.acquire('debris', 0.28 + Math.random() * 0.25);
+      if (!p) break;
+      const a = Math.random() * Math.PI * 2;
+      const sp = 70 + Math.random() * 150;
+      p.x = x;
+      p.y = y;
+      p.z = z;
+      p.vx = Math.cos(a) * sp;
+      p.vy = Math.sin(a) * sp;
+      p.vz = 70 + Math.random() * 130;
+      p.size = 2 + Math.random() * 2;
+      p.color = i % 2 === 0 ? '#ffffff' : color;
+    }
+  }
+
   // ---------- Events ----------
 
   handleEvent(event: GameEvent): void {
     switch (event.type) {
       case 'vfx_explosion':
         this.explode(event.x, event.y, event.z, event.color, event.count);
+        break;
+      case 'vfx_implosion':
+        this.implode(event.x, event.y, event.z, event.color, event.radius ?? 14);
+        break;
+      case 'vfx_electric_detonation':
+        this.electricDetonation(event.x, event.y, event.z, event.color ?? '#67e8f9', event.tendrils ?? 6);
         break;
       case 'vfx_shockwave':
         this.shockwave(event.x, event.y, event.z, event.radius, event.color, event.rings ?? 1);
@@ -258,7 +349,7 @@ export class VfxSystem {
           p.vx *= 0.6;
           p.vy *= 0.6;
         }
-      } else if (p.kind === 'flame' || p.kind === 'smoke') {
+      } else if (p.kind === 'flame' || p.kind === 'smoke' || p.kind === 'implode_spark') {
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         p.z += p.vz * dt;
@@ -339,6 +430,28 @@ export class VfxSystem {
           ctx.beginPath();
           ctx.arc(s.x, sy, r, 0, Math.PI * 2);
           ctx.stroke();
+          ctx.shadowBlur = 0;
+          break;
+        }
+        case 'implode_ring': {
+          const r = Math.max(1.5, p.x2 * t);
+          ctx.globalAlpha = Math.min(1, t * 1.15);
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = Math.max(1, p.size * (0.6 + 0.4 * t));
+          ctx.shadowColor = p.color;
+          ctx.shadowBlur = 10;
+          ctx.beginPath();
+          ctx.arc(s.x, sy, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.shadowBlur = 0;
+          break;
+        }
+        case 'implode_spark': {
+          ctx.globalAlpha = Math.min(1, t * 1.4);
+          ctx.shadowColor = p.color;
+          ctx.shadowBlur = 6;
+          const sz = Math.max(1.2, p.size * t);
+          ctx.fillRect(s.x - sz / 2, sy - sz / 2, sz, sz);
           ctx.shadowBlur = 0;
           break;
         }

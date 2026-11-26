@@ -85,12 +85,18 @@ function entries(models: ModelSet): GalleryEntry[] {
   ];
 }
 
+export interface GalleryOptions {
+  onClose?: () => void;
+  closeLabel?: string;
+}
+
 /**
  * Opens the gallery overlay. `cache` is accepted so the inspector can be
  * extended with baked-angle readouts without re-baking anything.
  */
 export function createModelGallery(
   resources: { models: ModelSet; cache: SpriteStackCache },
+  options: GalleryOptions = {},
 ): GalleryHandle {
   const list = entries(resources.models);
   const overlay = document.createElement('div');
@@ -100,11 +106,12 @@ export function createModelGallery(
     'display:flex;flex-direction:column;align-items:center;overflow:auto;padding:24px;' +
     'font-family:ui-monospace,monospace;color:#e2e8f0;';
 
+  const closeLabel = options.closeLabel ?? 'CLOSE [G]';
   const header = document.createElement('div');
   header.style.cssText = 'width:100%;max-width:1180px;display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;';
   header.innerHTML =
     '<div style="font-size:20px;color:#22d3ee;letter-spacing:4px;text-shadow:0 0 12px #22d3ee;">MODEL GALLERY // SPRITE INSPECTOR · 5× TURNTABLE</div>' +
-    '<button id="gallery-close" style="background:#0f172a;color:#f43f5e;border:2px solid #f43f5e;padding:6px 14px;font:inherit;cursor:pointer;letter-spacing:2px;">CLOSE [G]</button>';
+    `<button id="gallery-close" style="background:#0f172a;color:#f43f5e;border:2px solid #f43f5e;padding:6px 14px;font:inherit;cursor:pointer;letter-spacing:2px;">${closeLabel}</button>`;
   overlay.appendChild(header);
 
   const grid = document.createElement('div');
@@ -168,6 +175,7 @@ export function createModelGallery(
     overlay.style.display = 'none';
     open = false;
     cancelAnimationFrame(raf);
+    options.onClose?.();
   };
   const reopen = () => {
     overlay.style.display = 'flex';
@@ -178,8 +186,13 @@ export function createModelGallery(
   overlay.querySelector('#gallery-close')?.addEventListener('click', onCloseClick);
   const onKey = (ev: KeyboardEvent) => {
     if (ev.key === 'g' || ev.key === 'G' || ev.key === 'Escape') {
-      if (open) close();
-      else reopen();
+      if (open) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        close();
+      } else if (!options.onClose) {
+        reopen();
+      }
     }
   };
   window.addEventListener('keydown', onKey);

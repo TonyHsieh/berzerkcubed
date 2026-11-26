@@ -436,14 +436,19 @@ export interface BossState {
 
 // ---------- Events & Difficulty Config ----------
 
+export type GamePhase = 'title' | 'playing' | 'paused';
+
 export type GameEvent =
   | { type: 'sfx'; sound: string; x?: number; y?: number }
   | { type: 'voice_taunt'; text: string; pitch: number; rate: number; speaker: string }
   | { type: 'vfx_explosion'; x: number; y: number; z: number; color: string; count: number }
+  | { type: 'vfx_implosion'; x: number; y: number; z: number; color: string; radius?: number }
+  | { type: 'vfx_electric_detonation'; x: number; y: number; z: number; color?: string; tendrils?: number }
   | { type: 'vfx_shockwave'; x: number; y: number; z: number; radius: number; color: string; rings?: number }
   | { type: 'vfx_lightning_arc'; x1: number; y1: number; x2: number; y2: number; color?: string }
   | { type: 'vfx_flame_smoke'; x: number; y: number; z: number }
   | { type: 'vfx_sizzle'; x: number; y: number; z: number }
+  | { type: 'music_mode'; mode: 'silent' | 'level' | 'boss'; fadeSec?: number }
   | { type: 'camera_shake'; magnitude: number; duration: number }
   | { type: 'crate_destroyed'; x: number; y: number }
   | { type: 'player_fell'; x: number; y: number };
@@ -457,6 +462,8 @@ export interface DifficultyConfig {
   grenadierHp: number;
   enemyProjectileSpeed: number;
   ottoWarningSec: number;
+  /** Milestone 4.15: delay (s) after boss death explosion before Evil Otto alarm starts. */
+  ottoAlarmStartDelaySec: number;
   playerMaxHp: number;
   playerMaxShield: number;
   shieldRegenRate: number;

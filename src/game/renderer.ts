@@ -36,6 +36,15 @@ export const DEFAULT_WALL_CHUNK_SIZE = 56;
 /** Duration (seconds) of the brief post-rez fading flash halo after materialization completes. */
 export const REZ_POST_HALO_SEC = 0.15;
 
+/**
+ * Milestone 4.15: Pure travel-heading helper for projectiles (in degrees).
+ * Renderer adds `camera.angleDeg` to orient directional bolts such as Tesla lightning spears.
+ */
+export function projectileHeadingDeg(p: Pick<Projectile, 'vx' | 'vy'>): number {
+  if (p.vx === 0 && p.vy === 0) return 0;
+  return (Math.atan2(p.vy, p.vx) * 180) / Math.PI;
+}
+
 export interface WallChunk {
   x: number;
   y: number;
@@ -1641,16 +1650,56 @@ function drawProjectile(
     ctx.lineWidth = 1.2;
     ctx.stroke();
   } else if (p.kind === 'lightning') {
-    ctx.strokeStyle = p.color;
-    ctx.lineWidth = 3;
+    // Milestone 4.15: Travel-aligned jagged crackling electric arc spear
+    const headingRad = (projectileHeadingDeg(p) * Math.PI) / 180 + camRad;
+    const len = Math.max(22, p.radius * 3.4);
+    const jitterA = Math.sin(elapsedTime * 68 + p.x * 0.31) * 4.5;
+    const jitterB = Math.cos(elapsedTime * 74 + p.y * 0.27) * 5.0;
+    const jitterC = Math.sin(elapsedTime * 82 + p.x * 0.19 - p.y * 0.13) * 3.5;
+
+    ctx.translate(screenX, sy);
+    ctx.rotate(headingRad);
+
+    // Outer cyan/blue electric corona
+    ctx.shadowColor = p.color || '#67e8f9';
+    ctx.shadowBlur = 16;
+    ctx.strokeStyle = p.color || '#67e8f9';
+    ctx.lineWidth = 4.2;
+    ctx.lineJoin = 'miter';
     ctx.beginPath();
-    ctx.moveTo(screenX - p.vx * 0.025, sy - p.vy * 0.025);
-    ctx.lineTo(screenX + 3, sy - 3);
-    ctx.lineTo(screenX, sy);
+    ctx.moveTo(-len * 0.65, 0);
+    ctx.lineTo(-len * 0.3, jitterA);
+    ctx.lineTo(0, -jitterB);
+    ctx.lineTo(len * 0.28, jitterC);
+    ctx.lineTo(len * 0.55, 0);
     ctx.stroke();
+
+    // Bright white-hot crackling core spear
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.3;
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.moveTo(-len * 0.62, 0);
+    ctx.lineTo(-len * 0.3, jitterA * 0.7);
+    ctx.lineTo(0, -jitterB * 0.7);
+    ctx.lineTo(len * 0.28, jitterC * 0.7);
+    ctx.lineTo(len * 0.62, 0);
     ctx.stroke();
+
+    // Crackling side micro-arcs off the spearhead
+    ctx.strokeStyle = p.color || '#38bdf8';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(len * 0.18, 0);
+    ctx.lineTo(len * 0.36, -6.5);
+    ctx.moveTo(len * 0.12, 0);
+    ctx.lineTo(len * 0.32, 6.5);
+    ctx.stroke();
+
+    // Glowing spearhead tip
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(len * 0.55, 0, 2.6, 0, Math.PI * 2);
+    ctx.fill();
   } else if (p.kind === 'mine') {
     ctx.strokeStyle = '#f43f5e';
     ctx.lineWidth = 2;
@@ -1893,6 +1942,12 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
 
       // 1. Parallax cyber-circuit PCB background
       circuitBg.render(ctx, camera, width, height);
+
+      // Milestone 4.15: Title Screen renders over live animated parallax circuit board only
+      if (state.phase === 'title') {
+        vfx.renderCrt(ctx, width, height);
+        return;
+      }
 
       const shake = getCameraShakeOffset(camera);
       const tr = state.roomTransition && state.roomTransition.active ? state.roomTransition : null;
@@ -2324,8 +2379,23 @@ export function createRenderer(options: RendererOptions = {}): GameRenderer {
       // Close incoming / active room push-slide transform
       ctx.restore();
 
-      // 4. Pooled VFX particles + optional CRT scanline overlay
+      // 4. Pooled VFX particles + Evil Otto alarm border pulse + optional CRT scanline overlay
       vfx.render(ctx, project, camera);
+
+      if (state.ottoWarningActive && !state.gameOver) {
+        const pulse = 0.5 + 0.5 * Math.sin(state.elapsedTime * 12);
+        const borderColor = pulse > 0.5 ? '#ef4444' : '#f59e0b';
+        const alpha = 0.32 + pulse * 0.45;
+        ctx.save();
+        ctx.strokeStyle = borderColor;
+        ctx.globalAlpha = alpha;
+        ctx.lineWidth = 10 + pulse * 8;
+        ctx.shadowColor = borderColor;
+        ctx.shadowBlur = 24;
+        ctx.strokeRect(4, 4, Math.max(0, width - 8), Math.max(0, height - 8));
+        ctx.restore();
+      }
+
       vfx.renderCrt(ctx, width, height);
     },
   };

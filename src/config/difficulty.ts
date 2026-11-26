@@ -9,6 +9,7 @@ export const DEFAULT_DIFFICULTY: DifficultyConfig = {
   grenadierHp: 60,
   enemyProjectileSpeed: 280,
   ottoWarningSec: 45,
+  ottoAlarmStartDelaySec: 4.0,
   playerMaxHp: 100,
   playerMaxShield: 100,
   shieldRegenRate: 18,

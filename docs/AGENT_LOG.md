@@ -235,3 +235,22 @@ Spec: `docs/specs/milestone-4.13-tweaks.md`.
 - **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
   - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed).
   - `pnpm test` (`vitest run`): **PASSED** — **16 test files passed (16), 122 tests passed (122)** (111 prior + 11 new).
+
+## Milestone 4.15 — Projectile End VFX, Early Otto Alarm, Tesla Orientation, Music Crossfade, Pause Menu & Title Screen
+
+- **Files modified**:
+  - `src/engine/types.ts` — added `GamePhase`, `vfx_implosion` / `vfx_electric_detonation` / `music_mode` events, `ottoAlarmStartDelaySec` config field.
+  - `src/config/difficulty.ts` — `ottoAlarmStartDelaySec: 4.0` default.
+  - `src/engine/input.ts` — gamepad Start/Menu button + `startPressed` / `anyPressed` snapshots.
+  - `src/game/gameState.ts` — exported `transitionGamePhase`, `startFromTitle`, `togglePause`, `resumeGame`, `quitToTitle`, `computeOttoAlarmTiming`, `evaluateOttoAlarm`, `cancelOttoAlarm`, `emitElectricDetonation`, `emitProjectileImpactVfx`, `emitProjectileTimeoutVfx`; wired universal impact/implosion VFX, 4s-delayed Otto alarm with BEWARE!/I SENSE YOU!/HUMANOID taunts, boss/level music-mode events, and a `paused`/`title` simulation freeze.
+  - `src/render/vfx.ts` — `VfxSystem.implode()` + `implode_ring`/`implode_spark` particles + electric-detonation tendrils; handles the new events.
+  - `src/game/renderer.ts` — exported pure `projectileHeadingDeg()`; travel-aligned jagged electric arc spears; title screen drawn over the live circuit background.
+  - `src/audio/soundEngine.ts` — dual-bus level/boss music rig with `getMusicMode()`, `setMusicMode()`, fade/crossfade helpers, `setPaused()`, and an `otto_alarm` synth voice.
+  - `src/game/hud.ts` — Otto countdown banner and neon PAUSED modal (Resume / Restart / Model Gallery / Quit to Title) + arcade title overlay.
+  - `src/main.ts` — explicit title→playing→paused arcade flow, any-button start, Escape/Start pause toggle, pause actions and music fades.
+  - `src/game/gallery.ts` — back-to-pause integration.
+- **Files created**:
+  - `src/game/milestone415.test.ts` — 19 headless Vitest tests across all 6 verification-gate features.
+- **Verification & Regression Proof** (`nix develop --impure --command sh -c "pnpm run build && pnpm test"`):
+  - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 1000 modules transformed).
+  - `pnpm test` (`vitest run`): **PASSED** — **17 test files passed (17), 141 tests passed (141)** (122 prior + 19 new). A backward-compatible `computeOttoAlarmTiming()` preserves the old short-`ottoWarningSec` contract while defaulting to the spec's 4s delay / 45s warning.

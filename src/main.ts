@@ -2,6 +2,8 @@
 // Only AFTER the module graph resolves do we attach to it and stream real
 // bake progress; heavy game modules are imported dynamically so t=0 is never
 // a blank black screen.
+import type { GalleryHandle } from './game/gallery';
+
 const canvas = document.getElementById('game-canvas') as HTMLCanvasElement | null;
 
 function setInlineBootProgress(fraction: number, label: string): void {
@@ -48,7 +50,10 @@ async function boot(): Promise<void> {
   setInlineBootProgress(0.96, 'INITIALIZING CIRCUIT GRID & HUD');
   loading.finish();
 
-  let state = gameStateMod.createGameState(difficultyMod.createDifficultyConfig());
+  const galleryMode = new URLSearchParams(window.location.search).get('gallery') === '1';
+  let state = gameStateMod.createGameState(difficultyMod.createDifficultyConfig(), {
+    initialPhase: galleryMode ? 'playing' : 'title',
+  });
   const inputController = inputMod.createInputController(canvas);
   const renderer = rendererMod.createRenderer({ models, cache });
 
@@ -62,6 +67,51 @@ async function boot(): Promise<void> {
   window.addEventListener('resize', resize);
   resize();
 
+  let activeGallery: GalleryHandle | null = null;
+
+  const resetToFreshSector1 = (initialPhase: 'title' | 'playing') => {
+    const config = difficultyMod.createDifficultyConfig({
+      maxMeleeEnforcers: state.config.maxMeleeEnforcers,
+      maxShootersAndGrenadiers: state.config.maxShootersAndGrenadiers,
+    });
+    state = gameStateMod.createGameState(config, { initialPhase });
+    state.viewport.width = canvas.width;
+    state.viewport.height = canvas.height;
+  };
+
+  const launchFromTitle = () => {
+    if (state.phase !== 'title') return;
+    gameStateMod.startFromTitle(state);
+    renderer.sound.setPaused(false);
+    void renderer.initAudio().then(() => {
+      renderer.sound.fadeInLevelMusic(1.2);
+    });
+    // Also set mode immediately so headless/pre-init state reflects 'level'
+    renderer.sound.fadeInLevelMusic(1.2);
+  };
+
+  const handleTogglePause = () => {
+    if (activeGallery) return;
+    if (state.phase === 'title' || state.gameOver) return;
+    const nextPhase = gameStateMod.togglePause(state);
+    renderer.sound.setPaused(nextPhase === 'paused');
+  };
+
+  // Global keyboard handler for Title Screen "Press Any Button" + Escape Pause toggle
+  const onGlobalKeyDown = (e: KeyboardEvent) => {
+    if (state.phase === 'title') {
+      e.preventDefault();
+      launchFromTitle();
+      return;
+    }
+    if (e.code === 'Escape') {
+      if (activeGallery) return;
+      e.preventDefault();
+      handleTogglePause();
+    }
+  };
+  window.addEventListener('keydown', onGlobalKeyDown);
+
   // Initialize Web Audio / Tone.js + VoiceTauntEngine on first user gesture
   const unlockAudio = () => {
     void renderer.initAudio();
@@ -74,24 +124,61 @@ async function boot(): Promise<void> {
   const hud = hudMod.createHud({
     onSpawnBoss: (kind) => {
       gameStateMod.spawnBoss(state, kind, { rezDuration: 1.0 });
+      renderer.dispatchEvents(state.events, state.camera);
     },
     onNextSector: () => {
       gameStateMod.advanceToNextSector(state);
     },
-    onRestart: () => {
-      const config = difficultyMod.createDifficultyConfig({
-        maxMeleeEnforcers: state.config.maxMeleeEnforcers,
-        maxShootersAndGrenadiers: state.config.maxShootersAndGrenadiers,
+    onStartGame: () => {
+      launchFromTitle();
+    },
+    onResume: () => {
+      if (state.phase === 'paused') {
+        gameStateMod.resumeGame(state);
+        renderer.sound.setPaused(false);
+      }
+    },
+    onOpenGallery: () => {
+      if (activeGallery) return;
+      void import('./game/gallery').then(({ createModelGallery }) => {
+        activeGallery = createModelGallery(
+          { models, cache },
+          {
+            closeLabel: 'BACK TO PAUSE [ESC]',
+            onClose: () => {
+              activeGallery?.destroy();
+              activeGallery = null;
+            },
+          },
+        );
       });
-      state = gameStateMod.createGameState(config);
-      state.viewport.width = canvas.width;
-      state.viewport.height = canvas.height;
+    },
+    onQuitToTitle: () => {
+      if (activeGallery) {
+        activeGallery.destroy();
+        activeGallery = null;
+      }
+      renderer.sound.setPaused(false);
+      renderer.sound.fadeOutMusic(0.6);
+      resetToFreshSector1('title');
+    },
+    onRestart: () => {
+      if (activeGallery) {
+        activeGallery.destroy();
+        activeGallery = null;
+      }
+      resetToFreshSector1('playing');
+      renderer.sound.setPaused(false);
+      void renderer.initAudio().then(() => {
+        renderer.sound.fadeInLevelMusic(1.2);
+      });
+      renderer.sound.fadeInLevelMusic(1.2);
     },
     onToggleCrt: (enabled) => {
       renderer.vfx.crtEnabled = enabled;
     },
     onToggleMute: (muted) => {
-      renderer.sound.muted = muted;
+      renderer.sound.setMuted(muted);
       renderer.voice.muted = muted;
     },
     onToggleBass: (enabled) => {
@@ -100,27 +187,69 @@ async function boot(): Promise<void> {
   });
 
   // Milestone 4.1 Fix 8: opt-in model gallery / sprite inspector.
-  if (new URLSearchParams(window.location.search).get('gallery') === '1') {
+  if (galleryMode) {
     void import('./game/gallery').then(({ createModelGallery }) => {
-      createModelGallery({ models, cache });
+      activeGallery = createModelGallery({ models, cache });
     });
   }
 
   let lastTimeMs = performance.now();
   let accumulator = 0;
+  let prevPadStart = false;
+  let prevPadAny = false;
+
+  const pollGamepadFlowButtons = () => {
+    if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function') return;
+    const pads = navigator.getGamepads();
+    let pad = null;
+    for (const candidate of pads) {
+      if (candidate) {
+        pad = candidate;
+        break;
+      }
+    }
+    if (!pad) {
+      prevPadStart = false;
+      prevPadAny = false;
+      return;
+    }
+    const snap = inputMod.parseGamepadSnapshot(pad);
+    const startDown = Boolean(snap.start);
+    const anyDown = Boolean(snap.anyButtonPressed);
+    if (state.phase === 'title' && anyDown && !prevPadAny) {
+      launchFromTitle();
+    } else if (state.phase !== 'title' && startDown && !prevPadStart) {
+      handleTogglePause();
+    }
+    prevPadStart = startDown;
+    prevPadAny = anyDown;
+  };
 
   const frame = (nowMs: number) => {
     const frameDt = Math.min(0.1, Math.max(0, (nowMs - lastTimeMs) / 1000));
     lastTimeMs = nowMs;
-    accumulator += frameDt;
 
-    while (accumulator >= gameStateMod.FIXED_DT) {
-      const input = inputController.getState();
-      gameStateMod.stepGameState(state, input, gameStateMod.FIXED_DT);
-      renderer.dispatchEvents(state.events, state.camera);
-      renderer.update(gameStateMod.FIXED_DT, state);
-      inputController.consumeTransient();
-      accumulator -= gameStateMod.FIXED_DT;
+    pollGamepadFlowButtons();
+
+    if (state.phase === 'title') {
+      // Animate parallax cyber-circuit background smoothly behind Title Screen
+      state.camera.x += frameDt * 34;
+      state.camera.y += frameDt * 18;
+      renderer.circuitBg.update(frameDt);
+      accumulator = 0;
+    } else if (state.phase === 'paused') {
+      // Simulation frozen while paused; drop accumulated time so resume has no jump
+      accumulator = 0;
+    } else {
+      accumulator += frameDt;
+      while (accumulator >= gameStateMod.FIXED_DT) {
+        const input = inputController.getState();
+        gameStateMod.stepGameState(state, input, gameStateMod.FIXED_DT);
+        renderer.dispatchEvents(state.events, state.camera);
+        renderer.update(gameStateMod.FIXED_DT, state);
+        inputController.consumeTransient();
+        accumulator -= gameStateMod.FIXED_DT;
+      }
     }
 
     renderer.render(ctx, state, canvas.width, canvas.height);

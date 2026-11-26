@@ -41,6 +41,7 @@ import type {
   DifficultyConfig,
   EnemyState,
   GameEvent,
+  GamePhase,
   InputState,
   PlatformIsland,
   PlayerState,
@@ -129,6 +130,13 @@ export interface GameState {
   ottoTimer: number;
   ottoWarningActive: boolean;
   ottoSpawned: boolean;
+  /** Milestone 4.15: Evil Otto alarm countdown tracking & Sinistar taunt flags. */
+  ottoAlarmRemainingSec?: number;
+  ottoAlarmDurationSec?: number;
+  ottoAlarmStartTauntSent?: boolean;
+  ottoAlarmMidTauntSent?: boolean;
+  ottoAlarmFinalTauntSent?: boolean;
+  ottoAlarmPulseTimer?: number;
   waveIndex: number;
   wavesPerSector: number;
   waveSpawnTimer: number;
@@ -136,6 +144,8 @@ export interface GameState {
   bossDefeated: boolean;
   /** Milestone 4.13: active push-slide room transition when walking through an open exit door. */
   roomTransition: RoomTransitionState | null;
+  /** Milestone 4.15: explicit arcade flow phase ('title' | 'playing' | 'paused'). */
+  phase: GamePhase;
   gameOver: boolean;
   viewport: { width: number; height: number };
 }
@@ -192,12 +202,19 @@ export function createGameStateForSector(
     ottoTimer: 0,
     ottoWarningActive: false,
     ottoSpawned: false,
+    ottoAlarmRemainingSec: computeOttoAlarmTiming(config).totalCountdownSec,
+    ottoAlarmDurationSec: computeOttoAlarmTiming(config).totalCountdownSec,
+    ottoAlarmStartTauntSent: false,
+    ottoAlarmMidTauntSent: false,
+    ottoAlarmFinalTauntSent: false,
+    ottoAlarmPulseTimer: 0,
     waveIndex: 0,
     wavesPerSector: 2 + Math.min(safeSector, 3),
     waveSpawnTimer: INITIAL_WAVE_DELAY_SEC,
     bossSpawned: false,
     bossDefeated: false,
     roomTransition: null,
+    phase: 'playing',
     gameOver: false,
     viewport: { width: 1280, height: 720 },
   };
@@ -217,10 +234,260 @@ export function createGameStateForSector(
   return state;
 }
 
+export interface CreateGameStateOptions {
+  initialPhase?: GamePhase;
+}
+
 export function createGameState(
   config: DifficultyConfig = createDifficultyConfig(),
+  options: CreateGameStateOptions = {},
 ): GameState {
-  return createGameStateForSector(0, config);
+  const state = createGameStateForSector(0, config);
+  if (options.initialPhase) {
+    state.phase = options.initialPhase;
+  }
+  return state;
+}
+
+// ---------- Milestone 4.15: Explicit Game Phase State Machine ----------
+
+export type GamePhaseAction =
+  | 'start'
+  | 'toggle_pause'
+  | 'pause'
+  | 'resume'
+  | 'quit_to_title'
+  | 'restart';
+
+/** Pure, headless-testable state transition reducer for arcade flow phases. */
+export function transitionGamePhase(
+  current: GamePhase,
+  action: GamePhaseAction,
+): GamePhase {
+  switch (action) {
+    case 'start':
+      return current === 'title' ? 'playing' : current;
+    case 'toggle_pause':
+      if (current === 'playing') return 'paused';
+      if (current === 'paused') return 'playing';
+      return current;
+    case 'pause':
+      return current === 'playing' ? 'paused' : current;
+    case 'resume':
+      return current === 'paused' ? 'playing' : current;
+    case 'quit_to_title':
+      return 'title';
+    case 'restart':
+      return 'playing';
+  }
+}
+
+export function startFromTitle(state: GameState): GamePhase {
+  const next = transitionGamePhase(state.phase, 'start');
+  if (next !== state.phase) {
+    state.phase = next;
+    state.events.push({ type: 'music_mode', mode: 'level', fadeSec: 1.2 });
+  }
+  return state.phase;
+}
+
+export function togglePause(state: GameState): GamePhase {
+  if (state.gameOver || state.phase === 'title') return state.phase;
+  state.phase = transitionGamePhase(state.phase, 'toggle_pause');
+  return state.phase;
+}
+
+export function resumeGame(state: GameState): GamePhase {
+  state.phase = transitionGamePhase(state.phase, 'resume');
+  return state.phase;
+}
+
+export function quitToTitle(state: GameState): GamePhase {
+  state.phase = transitionGamePhase(state.phase, 'quit_to_title');
+  state.events.push({ type: 'music_mode', mode: 'silent', fadeSec: 0.6 });
+  return state.phase;
+}
+
+// ---------- Milestone 4.15: Early Evil Otto Alarm Pure Helpers ----------
+
+export interface OttoAlarmTiming {
+  /** Seconds after boss death before the alarm becomes visible. */
+  delaySec: number;
+  /** Seconds after boss death at which Otto actually arrives. */
+  warningSec: number;
+  /** Length of the visible countdown bar. */
+  totalCountdownSec: number;
+}
+
+/**
+ * Resolves the alarm timing. Honours the spec default (delay 4s / warning 45s)
+ * but never delays past an explicitly short warning window, preserving the
+ * pre-4.15 contract where callers set a small `ottoWarningSec` to speed Otto up.
+ */
+export function computeOttoAlarmTiming(
+  config: Pick<DifficultyConfig, 'ottoAlarmStartDelaySec' | 'ottoWarningSec'>,
+): OttoAlarmTiming {
+  const warningSec = Math.max(0.1, config.ottoWarningSec);
+  const configuredDelay = Math.max(0, config.ottoAlarmStartDelaySec ?? 4.0);
+  const delaySec = Math.min(configuredDelay, warningSec);
+  const totalCountdownSec = Math.max(0.1, warningSec - delaySec);
+  return { delaySec, warningSec, totalCountdownSec };
+}
+
+export interface OttoAlarmStatus {
+  active: boolean;
+  elapsedSinceBossDeath: number;
+  delaySec: number;
+  remainingSec: number;
+  totalCountdownSec: number;
+  progress: number;
+  shouldSpawnOtto: boolean;
+}
+
+/**
+ * Pure, headless-testable evaluator for the Evil Otto alarm timing after boss death.
+ * Starts after `config.ottoAlarmStartDelaySec` (default 4.0s) and triggers Evil Otto
+ * spawn at `config.ottoWarningSec`.
+ */
+export function evaluateOttoAlarm(
+  bossDefeated: boolean,
+  ottoSpawned: boolean,
+  ottoTimer: number,
+  config: Pick<DifficultyConfig, 'ottoAlarmStartDelaySec' | 'ottoWarningSec'>,
+): OttoAlarmStatus {
+  const { delaySec, warningSec, totalCountdownSec } = computeOttoAlarmTiming(config);
+
+  if (!bossDefeated || ottoSpawned) {
+    return {
+      active: false,
+      elapsedSinceBossDeath: ottoTimer,
+      delaySec,
+      remainingSec: totalCountdownSec,
+      totalCountdownSec,
+      progress: 0,
+      shouldSpawnOtto: false,
+    };
+  }
+
+  const active = ottoTimer >= delaySec;
+  const remainingSec = Math.max(0, warningSec - ottoTimer);
+  const progress = active
+    ? Math.max(0, Math.min(1, (ottoTimer - delaySec) / totalCountdownSec))
+    : 0;
+
+  return {
+    active,
+    elapsedSinceBossDeath: ottoTimer,
+    delaySec,
+    remainingSec,
+    totalCountdownSec,
+    progress,
+    shouldSpawnOtto: ottoTimer >= warningSec,
+  };
+}
+
+/** Cleanly cancels any active Evil Otto alarm state (e.g., when exiting through an open door). */
+export function cancelOttoAlarm(state: GameState): void {
+  state.ottoTimer = 0;
+  state.ottoWarningActive = false;
+  state.ottoAlarmStartTauntSent = false;
+  state.ottoAlarmMidTauntSent = false;
+  state.ottoAlarmFinalTauntSent = false;
+  state.ottoAlarmPulseTimer = 0;
+  const { totalCountdownSec } = computeOttoAlarmTiming(state.config);
+  state.ottoAlarmRemainingSec = totalCountdownSec;
+  state.ottoAlarmDurationSec = totalCountdownSec;
+}
+
+// ---------- Milestone 4.15: Universal Projectile End VFX ----------
+
+/**
+ * Emits a vivid electric detonation for Tesla / lightning projectiles:
+ * bright white/cyan core spark bursts + 6 radiating jagged micro-lightning tendrils + electric_zap SFX.
+ */
+export function emitElectricDetonation(
+  events: GameEvent[],
+  x: number,
+  y: number,
+  z: number,
+  color = '#67e8f9',
+): void {
+  const safeZ = Math.max(6, z);
+  events.push(
+    { type: 'vfx_electric_detonation', x, y, z: safeZ, color, tendrils: 6 },
+    { type: 'vfx_explosion', x, y, z: safeZ, color, count: 8 },
+    { type: 'sfx', sound: 'electric_zap', x, y },
+  );
+}
+
+/**
+ * Emits a scaled impact explosion matching the projectile kind and neon color
+ * whenever a projectile collides with a wall, closed door, crate, enemy, boss, shield, or hero.
+ */
+export function emitProjectileImpactVfx(
+  events: GameEvent[],
+  p: Projectile,
+  x = p.x,
+  y = p.y,
+): void {
+  const z = Math.max(4, p.z);
+  if (p.kind === 'lightning') {
+    emitElectricDetonation(events, x, y, z, p.color || '#67e8f9');
+    return;
+  }
+  if (p.kind === 'electric_wave') {
+    emitElectricDetonation(events, x, y, z, p.color || '#38bdf8');
+    return;
+  }
+  if (p.kind === 'sawblade') {
+    events.push(
+      { type: 'vfx_explosion', x, y, z: Math.max(10, z), color: '#ffffff', count: 7 },
+      { type: 'vfx_explosion', x, y, z: Math.max(10, z), color: '#f59e0b', count: 10 },
+      { type: 'sfx', sound: 'electric_zap', x, y },
+    );
+    return;
+  }
+  if (p.kind === 'flame') {
+    events.push(
+      { type: 'vfx_explosion', x, y, z, color: p.color || '#f97316', count: 6 },
+      { type: 'vfx_flame_smoke', x, y, z },
+    );
+    return;
+  }
+  if (p.kind === 'beam_segment') {
+    events.push({ type: 'vfx_explosion', x, y, z, color: p.color || '#38bdf8', count: 6 });
+    return;
+  }
+  const count = p.icbm
+    ? 22
+    : p.kind === 'grenade' || p.kind === 'sky_bomb' || p.kind === 'mine'
+      ? 16
+      : p.kind === 'homing_drone'
+        ? 10
+        : 6;
+  events.push({ type: 'vfx_explosion', x, y, z, color: p.color || '#22d3ee', count });
+}
+
+/**
+ * Emits a distinct smaller implosion when a projectile expires by timeout (`life <= 0`)
+ * without colliding with any target. Lightning projectiles also emit an electric detonation.
+ */
+export function emitProjectileTimeoutVfx(
+  events: GameEvent[],
+  p: Projectile,
+): void {
+  const z = Math.max(4, p.z);
+  events.push({
+    type: 'vfx_implosion',
+    x: p.x,
+    y: p.y,
+    z,
+    color: p.color || '#22d3ee',
+    radius: Math.max(10, p.radius * 2.2),
+  });
+  if (p.kind === 'lightning') {
+    emitElectricDetonation(events, p.x, p.y, z, p.color || '#67e8f9');
+  }
 }
 
 function createScaledBoss(
@@ -285,6 +552,7 @@ export function spawnBoss(
     state.bossSpawned = true;
     state.bossDefeated = false;
   }
+  state.events.push({ type: 'music_mode', mode: 'boss', fadeSec: 1.0 });
   return boss;
 }
 
@@ -437,7 +705,11 @@ export function startRoomTransition(
     outgoingCameraY,
   };
   next.roomTransition = transition;
-  next.events.push({ type: 'sfx', sound: 'door_hum', x: heroEnd.x, y: heroEnd.y });
+  cancelOttoAlarm(next);
+  next.events.push(
+    { type: 'sfx', sound: 'door_hum', x: heroEnd.x, y: heroEnd.y },
+    { type: 'music_mode', mode: 'silent', fadeSec: 0.6 },
+  );
 
   Object.assign(state, next);
   return transition;
@@ -914,9 +1186,21 @@ function advanceProjectiles(
         if (p.kind !== 'sawblade') {
           state.events.push({ type: 'sfx', sound: 'electric_zap', x: p.x, y: p.y });
         }
+        if (p.life <= 0) {
+          emitProjectileTimeoutVfx(state.events, p);
+        }
       } else {
         p.life = 0;
+        if (p.kind !== 'sawblade' && !(p.owner === 'boss' && p.kind === 'beam_segment')) {
+          emitProjectileImpactVfx(state.events, p, prevX, prevY);
+        }
       }
+      continue;
+    }
+
+    // Milestone 4.15: No projectile may vanish silently on timeout (life <= 0, no hit)
+    if (p.life <= 0) {
+      emitProjectileTimeoutVfx(state.events, p);
     }
   }
 }
@@ -967,6 +1251,7 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
         applyFreezeHit(enemy);
       }
       state.events.push({ type: 'sfx', sound: 'hit', x: enemy.x, y: enemy.y });
+      emitProjectileImpactVfx(state.events, p, p.x, p.y);
 
       if (p.kind === 'lightning' || p.modifiers.includes('lightning_chain')) {
         const maxChains = 2 * Math.max(1, state.player.weapon.level);
@@ -1013,6 +1298,7 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
         if (pickup) {
           state.pickups.push(pickup);
         }
+        emitProjectileImpactVfx(state.events, p, p.x, p.y);
         if (p.modifiers.includes('pierce') && p.bouncesLeft > 0) {
           p.bouncesLeft -= 1;
         } else {
@@ -1030,12 +1316,14 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
         state.boss.kind === 'bug_hive' &&
         interceptProjectileWithOrbitingBugs(state.boss, p, state.events)
       ) {
+        if (p.kind === 'lightning') emitElectricDetonation(state.events, p.x, p.y, p.z, p.color);
         if (p.life <= 0) continue;
       }
       if (
         state.boss.kind === 'maximilian' &&
         interceptProjectileWithAblativeShields(state.boss, p, state.events)
       ) {
+        if (p.kind === 'lightning') emitElectricDetonation(state.events, p.x, p.y, p.z, p.color);
         if (p.life <= 0) continue;
       }
       if (p.kind === 'grenade') {
@@ -1056,6 +1344,7 @@ function resolvePlayerProjectileCollisions(state: GameState): void {
       }
       const res = applyProjectileToBoss(state, p.x, p.y, p.radius, p.damage);
       if (res.hit) {
+        emitProjectileImpactVfx(state.events, p, p.x, p.y);
         if (res.damaged) {
           if (p.kind === 'flame') {
             state.boss.burnTimer = Math.max(state.boss.burnTimer ?? 0, BURN_DURATION_SEC);
@@ -1112,6 +1401,7 @@ function resolveHostileProjectilesVsPlayer(
       } else if (!isPlayerInvulnerable(player)) {
         damagePlayer(player, p.damage, state.config, state.events);
         p.life = 0;
+        emitProjectileImpactVfx(state.events, p, p.x, p.y);
       }
     }
   }
@@ -1320,6 +1610,11 @@ export function stepGameState(
 ): GameState {
   state.events.length = 0;
 
+  // Milestone 4.15: Freeze simulation completely while paused or on the Title Screen.
+  if (state.phase !== 'playing') {
+    return state;
+  }
+
   const clampedDt = Math.max(0, Math.min(dt, MAX_STEP_DT));
   if (clampedDt <= 0) return state;
 
@@ -1351,6 +1646,7 @@ export function stepGameState(
       state.player.lastSafeY = tr.heroEndY;
       tr.active = false;
       state.roomTransition = null;
+      state.events.push({ type: 'music_mode', mode: 'level', fadeSec: 1.2 });
     }
     return state;
   }
@@ -1590,13 +1886,77 @@ export function stepGameState(
     }
   }
 
-  // 8. Evil Otto timer after boss cleared (or lingering past ottoWarningSec)
+  // 8. Milestone 4.15: Early Evil Otto Alarm Countdown (starts 3-5s after boss death)
   if (state.bossDefeated && !state.ottoSpawned && state.boss === null) {
     state.ottoTimer += clampedDt;
-    if (state.ottoTimer >= state.config.ottoWarningSec * 0.7) {
+    const alarm = evaluateOttoAlarm(
+      state.bossDefeated,
+      state.ottoSpawned,
+      state.ottoTimer,
+      state.config,
+    );
+    state.ottoAlarmRemainingSec = alarm.remainingSec;
+    state.ottoAlarmDurationSec = alarm.totalCountdownSec;
+
+    if (alarm.active) {
       state.ottoWarningActive = true;
+
+      if (!state.ottoAlarmStartTauntSent) {
+        state.ottoAlarmStartTauntSent = true;
+        state.ottoAlarmPulseTimer = 0;
+        state.events.push(
+          {
+            type: 'voice_taunt',
+            text: 'BEWARE!',
+            pitch: 0.4,
+            rate: 0.78,
+            speaker: 'evil_otto',
+          },
+          { type: 'sfx', sound: 'otto_alarm', x: state.player.x, y: state.player.y },
+        );
+      } else {
+        state.ottoAlarmPulseTimer = (state.ottoAlarmPulseTimer ?? 0) + clampedDt;
+        if (state.ottoAlarmPulseTimer >= 2.5) {
+          state.ottoAlarmPulseTimer -= 2.5;
+          state.events.push({
+            type: 'sfx',
+            sound: 'otto_alarm',
+            x: state.player.x,
+            y: state.player.y,
+          });
+        }
+      }
+
+      if (alarm.progress >= 0.5 && !state.ottoAlarmMidTauntSent) {
+        state.ottoAlarmMidTauntSent = true;
+        state.events.push(
+          {
+            type: 'voice_taunt',
+            text: 'I SENSE YOU!',
+            pitch: 0.38,
+            rate: 0.76,
+            speaker: 'evil_otto',
+          },
+          { type: 'sfx', sound: 'otto_alarm', x: state.player.x, y: state.player.y },
+        );
+      }
+
+      if (alarm.progress >= 0.8 && !state.ottoAlarmFinalTauntSent) {
+        state.ottoAlarmFinalTauntSent = true;
+        state.events.push(
+          {
+            type: 'voice_taunt',
+            text: 'THE HUMANOID MUST NOT ESCAPE!',
+            pitch: 0.36,
+            rate: 0.74,
+            speaker: 'evil_otto',
+          },
+          { type: 'sfx', sound: 'otto_alarm', x: state.player.x, y: state.player.y },
+        );
+      }
     }
-    if (state.ottoTimer >= state.config.ottoWarningSec) {
+
+    if (alarm.shouldSpawnOtto) {
       const b = state.island.bounds;
       const ottoX = Math.max(
         b.x + 80,
@@ -1609,6 +1969,7 @@ export function stepGameState(
       state.boss = createEvilOtto(ottoX, ottoY, state.sectorIndex);
       state.ottoSpawned = true;
       state.ottoWarningActive = true;
+      state.events.push({ type: 'music_mode', mode: 'boss', fadeSec: 1.0 });
     }
   }
 
@@ -1744,9 +2105,10 @@ export function stepGameState(
     );
     if (defeated.kind !== 'evil_otto') {
       state.bossDefeated = true;
-      state.ottoTimer = 0;
+      cancelOttoAlarm(state);
       unlockCardinalExitDoors(state.island);
     }
+    state.events.push({ type: 'music_mode', mode: 'silent', fadeSec: 1.0 });
     state.boss = null;
   }
 

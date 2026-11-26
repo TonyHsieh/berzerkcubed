@@ -47,6 +47,10 @@ export interface GamepadSnapshot {
   swap: boolean;
   slotCycle: -1 | 0 | 1;
   swivelDir: -1 | 0 | 1;
+  /** Milestone 4.15: standard Start / Menu button (button 9). */
+  start?: boolean;
+  /** Milestone 4.15: true if any gamepad button is currently pressed. */
+  anyButtonPressed?: boolean;
 }
 
 /** Standard-mapping stick deadzone (Xbox / PlayStation / 8BitDo). */
@@ -82,6 +86,8 @@ export function parseGamepadSnapshot(
   const rightBumper = down(5);
   const dpadLeft = down(12);
   const dpadRight = down(13);
+  const start = down(9);
+  const anyButtonPressed = pad.buttons.some((b) => Boolean(b && (b.pressed || b.value > 0.5)));
 
   return {
     moveX: left.x,
@@ -93,6 +99,8 @@ export function parseGamepadSnapshot(
     swap: down(2),
     slotCycle: rightBumper && !leftBumper ? 1 : leftBumper && !rightBumper ? -1 : 0,
     swivelDir: dpadRight && !dpadLeft ? 1 : dpadLeft && !dpadRight ? -1 : 0,
+    start,
+    anyButtonPressed,
   };
 }
 
