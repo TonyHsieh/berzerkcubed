@@ -8,7 +8,7 @@ import {
 } from '../bosses/recogniser';
 import { updateEnforcers } from '../enemies/enforcer';
 import { GRENADE_GRAVITY, updateRangedEnemies } from '../enemies/shooter';
-import { spawnHordeWave } from '../enemies/spawner';
+import { spawnHordeWave, SAFE_SPAWN_CLEARANCE } from '../enemies/spawner';
 import { createCameraState, updateCamera } from '../engine/camera';
 import { SpatialGrid } from '../engine/spatialGrid';
 import type {
@@ -39,6 +39,7 @@ import {
   cycleWeaponSlot,
   pickupLabel,
   selectWeaponSlot,
+  shouldAutoCollectWeapon,
   weaponPickupLabel,
 } from '../entities/weapons';
 import { damageCrate } from '../world/crate';
@@ -124,7 +125,7 @@ export function createGameStateForSector(
   camera.x = player.x;
   camera.y = player.y;
 
-  return {
+  const state: GameState = {
     island,
     player,
     enemies: [],
@@ -154,6 +155,19 @@ export function createGameStateForSector(
     gameOver: false,
     viewport: { width: 1280, height: 720 },
   };
+
+  // Milestone 4.1: open with a small, far-away vanguard instead of an
+  // immediate dogpile. The rest of the swarm pours in through gates/waves.
+  const vanguard = spawnHordeWave(state.island, state.enemies, config, safeSector, {
+    heroX: spawnX,
+    heroY: spawnY,
+    clearance: SAFE_SPAWN_CLEARANCE,
+    vanguard: true,
+  });
+  state.enemies.push(...vanguard);
+  for (let i = 0; i < vanguard.length; i++) state.grid.insert(vanguard[i]);
+
+  return state;
 }
 
 export function createGameState(
@@ -713,8 +727,15 @@ export function stepGameState(
           state.enemies,
           state.config,
           state.sectorIndex,
+          {
+            heroX: state.player.x,
+            heroY: state.player.y,
+            clearance: SAFE_SPAWN_CLEARANCE,
+          },
         );
         if (spawned.length > 0) {
+          // Brief gate telegraph so the player sees where the horde enters.
+          state.events.push({ type: 'sfx', sound: 'door_hum', x: state.player.x, y: state.player.y });
           state.enemies.push(...spawned);
           for (let i = 0; i < spawned.length; i++) {
             state.grid.insert(spawned[i]);
@@ -925,7 +946,26 @@ export function stepGameState(
     const inRange = distSq <= collectDist * collectDist;
 
     if (pickup.kind === 'weapon') {
-      // Dropped weapons stay on the floor until the hero equips them with F.
+      const weaponType = pickup.weaponType;
+      // Milestone 4.1: auto-collect into an open slot or auto-upgrade a copy
+      // already carried. Only a full 3-slot inventory of distinct weapons
+      // leaves the drop on the floor for an explicit [F] swap.
+      if (inRange && weaponType && shouldAutoCollectWeapon(state.player, weaponType)) {
+        const outcome = applyWeaponPickupToSlots(state.player, weaponType);
+        pickup.life = 0;
+        state.score += 50;
+        state.toast = {
+          text: `${pickupLabel(pickup)} ${outcome.result === 'upgrade' ? 'LEVEL UP' : 'AUTO-EQUIPPED'}`,
+          life: 1.6,
+        };
+        state.events.push({
+          type: 'sfx',
+          sound: 'door_hum',
+          x: pickup.x,
+          y: pickup.y,
+        });
+        continue;
+      }
       if (inRange && distSq < nearestWeaponDistSq) {
         nearestWeapon = pickup;
         nearestWeaponDistSq = distSq;

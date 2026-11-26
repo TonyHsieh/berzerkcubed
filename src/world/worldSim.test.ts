@@ -102,6 +102,10 @@ describe('World Simulation & Floating Islands', () => {
       ),
     ).toBe(false);
 
+    // Deactivate every bridge so the open-edge fall below is unambiguous
+    // regardless of the seeded layout's active gates.
+    for (const b of island.bridges) setBridgeActive(island, b.id, false);
+
     // Player walks off open edge -> loses 1 life, emits player_fell, resurrects near lastSafe with invuln
     const config = createDifficultyConfig();
     const cam = createCameraState();

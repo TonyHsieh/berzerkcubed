@@ -20,6 +20,7 @@ import {
   MAX_WEAPON_LEVEL,
   pickupLabel,
   selectWeaponSlot,
+  shouldAutoCollectWeapon,
   WEAPON_SLOT_COUNT,
 } from './weapons';
 
@@ -330,5 +331,24 @@ describe('Hero Survivability, Dodge-Roll & Orbitals', () => {
     expect(meleeTarget.hp).toBeLessThan(40);
     expect(enemyBolt.life).toBe(0);
     expect(shield.hp).toBe(30);
+  });
+});
+
+describe('Effortless weapon auto-pickup (Milestone 4.1, Fix 5)', () => {
+  it('auto-collects into an open slot and auto-upgrades a carried type', () => {
+    const player = createPlayer(0, 0, createDifficultyConfig());
+    // Starter pulse rifle + two empty slots: any pickup auto-collects.
+    expect(shouldAutoCollectWeapon(player, 'spread')).toBe(true);
+    expect(shouldAutoCollectWeapon(player, 'pulse_rifle')).toBe(true);
+  });
+
+  it('requires F only when all three slots are full with distinct types', () => {
+    const player = createPlayer(0, 0, createDifficultyConfig());
+    applyWeaponPickupToSlots(player, 'spread');
+    applyWeaponPickupToSlots(player, 'machine_gun');
+    expect(player.weaponSlots?.every((slot) => slot !== null)).toBe(true);
+    expect(shouldAutoCollectWeapon(player, 'shotgun')).toBe(false);
+    // A duplicate of a carried weapon still auto-upgrades even when full.
+    expect(shouldAutoCollectWeapon(player, 'spread')).toBe(true);
   });
 });

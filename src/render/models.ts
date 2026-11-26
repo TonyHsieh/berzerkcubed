@@ -99,97 +99,101 @@ export function buildHeroModel(): HeroModel {
 
 // ---------------- Enemies ----------------
 
-/** Humanoid Tron Enforcer: separated legs/stride, armored torso, crimson visor.
- *  5 layers × 3 gait frames, still baked into a single drawImage per enemy. */
+/**
+ * Melee Enforcer: lean, tall humanoid soldier. Separated striding legs with a
+ * visible gap, narrow waist, broad shoulder pads and twin neon-red batons.
+ * 12 layers × 3 gait frames, still baked into one drawImage per enemy.
+ */
 export function buildEnforcerFrames(): Slice[][] {
-  const swing = [0, 3, -3]; // 3 distinct gait frames
-  return swing.map((sw) =>
-    layers(5, (ctx, cx, cy, z) => {
-      const chassis = '#0b0b10';
-      const plate = '#181820';
+  const swings = [0, 3, -3];
+  return swings.map((sw) =>
+    layers(12, (ctx, cx, cy, z) => {
+      const chassis = '#08080d';
+      const plate = '#1c1c26';
       const neon = '#dc2626';
       const hot = '#ff2a2a';
-
-      if (z <= 1) {
-        // Distinct legs with opposing stride and glowing boots.
-        rect(ctx, chassis, cx - 5 + sw, cy - 2, 4, 7);
-        rect(ctx, chassis, cx + 1 - sw, cy - 2, 4, 7);
-        rect(ctx, neon, cx - 5 + sw, cy + 4, 4, 1);
-        rect(ctx, neon, cx + 1 - sw, cy + 4, 4, 1);
-        if (z === 1) {
-          rect(ctx, plate, cx - 5 + sw, cy - 1, 4, 3);
-          rect(ctx, plate, cx + 1 - sw, cy - 1, 4, 3);
-        }
-      } else if (z <= 3) {
-        // Armored torso, pauldrons and swinging arms.
-        rect(ctx, chassis, cx - 6, cy - 6, 12, 9);
-        rect(ctx, plate, cx - 8, cy - 6, 3, 5);
-        rect(ctx, plate, cx + 5, cy - 6, 3, 5);
-        rect(ctx, neon, cx - 8, cy - 7, 3, 1);
-        rect(ctx, neon, cx + 5, cy - 7, 3, 1);
-        rect(ctx, chassis, cx - 8, cy - 1 + sw, 2, 6);
-        rect(ctx, chassis, cx + 6, cy - 1 - sw, 2, 6);
-        rect(ctx, hot, cx - 8, cy + 4 + sw, 2, 1);
-        rect(ctx, hot, cx + 6, cy + 4 - sw, 2, 1);
-        if (z === 2) {
-          rect(ctx, hot, cx - 2, cy - 4, 4, 4); // reactor core
-        } else {
-          rect(ctx, '#7f1d1d', cx - 5, cy - 5, 10, 1);
-        }
+      if (z <= 3) {
+        const leg = Math.round((sw * z) / 3);
+        rect(ctx, chassis, cx - 5 + leg, cy - 3, 4, 9);
+        rect(ctx, chassis, cx + 1 - leg, cy - 3, 4, 9);
+        rect(ctx, neon, cx - 5 + leg, cy + 5, 4, 1);
+        rect(ctx, neon, cx + 1 - leg, cy + 5, 4, 1);
+        if (z === 3) rect(ctx, plate, cx - 5, cy - 3, 10, 3);
+      } else if (z <= 8) {
+        const w = z <= 5 ? 10 : 14;
+        rect(ctx, chassis, cx - w / 2, cy - 7, w, 9);
+        rect(ctx, plate, cx - 8, cy - 8, 4, 4);
+        rect(ctx, plate, cx + 4, cy - 8, 4, 4);
+        rect(ctx, neon, cx - 8, cy - 9, 4, 1);
+        rect(ctx, neon, cx + 4, cy - 9, 4, 1);
+        rect(ctx, hot, cx - 2, cy - 6 + Math.round(sw / 2), 4, 3);
+        rect(ctx, chassis, cx - 9, cy - 2 + sw, 2, 7);
+        rect(ctx, chassis, cx + 7, cy - 2 - sw, 2, 7);
+        rect(ctx, hot, cx - 10, cy - 7 + sw, 2, 4);
+        rect(ctx, hot, cx + 8, cy - 7 - sw, 2, 4);
       } else {
-        // Head with a wide crimson visor and antenna.
-        rect(ctx, chassis, cx - 4, cy - 4, 8, 7);
-        rect(ctx, hot, cx - 3, cy - 5, 6, 2);
-        rect(ctx, neon, cx - 1, cy - 7, 2, 2);
+        rect(ctx, chassis, cx - 4, cy - 5, 8, 8);
+        rect(ctx, hot, cx - 3, cy - 6, 6, 2);
+        rect(ctx, neon, cx - 1, cy - 9, 2, 3);
       }
     }),
   );
 }
 
-/** Humanoid ranged variant: same silhouette family, slimmer legs + rifle. */
+/** Laser Shooter: wide tripod/turret-shouldered sniper droid with an amber barrel and crest. */
 export function buildLaserShooterFrames(): Slice[][] {
   return [0, 1].map((f) => {
     const step = f === 0 ? 2 : -2;
-    return layers(5, (ctx, cx, cy, z) => {
-      if (z <= 1) {
-        rect(ctx, '#0b0b10', cx - 4 + step, cy - 1, 3, 7);
-        rect(ctx, '#0b0b10', cx + 1 - step, cy - 1, 3, 7);
-        rect(ctx, '#f43f5e', cx - 4 + step, cy + 5, 3, 1);
-        rect(ctx, '#f43f5e', cx + 1 - step, cy + 5, 3, 1);
-      } else if (z <= 3) {
-        rect(ctx, '#111118', cx - 6, cy - 6, 12, 9);
-        rect(ctx, '#b91c1c', cx - 8, cy - 6, 3, 4);
-        rect(ctx, '#b91c1c', cx + 5, cy - 6, 3, 4);
-        rect(ctx, '#ff3b3b', cx - 1, cy - 4, 2, 4);
-        rect(ctx, '#111118', cx - 8, cy - 1 + step, 2, 5);
-        rect(ctx, '#111118', cx + 6, cy - 1 - step, 2, 5);
+    return layers(12, (ctx, cx, cy, z) => {
+      const body = '#0c0c12';
+      const amber = '#f59e0b';
+      if (z <= 2) {
+        rect(ctx, body, cx - 7 + step, cy - 2, 4, 8);
+        rect(ctx, body, cx + 3 - step, cy - 2, 4, 8);
+        rect(ctx, body, cx - 1, cy, 2, 7);
+        rect(ctx, amber, cx - 7 + step, cy + 5, 4, 1);
+        rect(ctx, amber, cx + 3 - step, cy + 5, 4, 1);
+      } else if (z <= 7) {
+        rect(ctx, body, cx - 9, cy - 8, 18, 9);
+        rect(ctx, '#b45309', cx - 10, cy - 9, 5, 4);
+        rect(ctx, '#b45309', cx + 5, cy - 9, 5, 4);
+        rect(ctx, amber, cx - 2, cy - 7, 4, 4);
       } else {
-        rect(ctx, '#0b0b10', cx - 4, cy - 4, 8, 7);
-        rect(ctx, '#ff3b3b', cx - 3, cy - 5, 6, 2);
-        rect(ctx, '#ff3b3b', cx - 1, cy - 11, 2, 8); // rifle barrel
+        rect(ctx, body, cx - 4, cy - 5, 8, 7);
+        rect(ctx, amber, cx - 3, cy - 6, 6, 2);
+        rect(ctx, '#fbbf24', cx - 1, cy - 12, 2, 10);
+        rect(ctx, '#fde68a', cx - 1, cy - 12, 2, 2);
       }
     });
   });
 }
 
-/** Heavier humanoid grenadier with a shoulder launcher tube. */
+/** Grenadier: squat heavy bombardier mech with twin mortar tubes and a wide stance. */
 export function buildGrenadierFrames(): Slice[][] {
   return [0, 1].map((f) => {
     const step = f === 0 ? 3 : -3;
-    return layers(6, (ctx, cx, cy, z) => {
-      if (z <= 1) {
-        rect(ctx, '#101016', cx - 5 + step, cy - 1, 4, 7);
-        rect(ctx, '#101016', cx + 1 - step, cy - 1, 4, 7);
-        rect(ctx, '#fb923c', cx - 5 + step, cy + 5, 4, 1);
-        rect(ctx, '#fb923c', cx + 1 - step, cy + 5, 4, 1);
-      } else if (z <= 4) {
-        rect(ctx, '#101016', cx - 7, cy - 6, 14, 10);
-        rect(ctx, '#f97316', cx - 7, cy - 7, 14, 1);
-        rect(ctx, '#292524', cx - 3, cy - 10, 6, 5); // launcher tube
-        rect(ctx, '#fb923c', cx - 2, cy - 11, 4, 1);
+    return layers(12, (ctx, cx, cy, z) => {
+      const hull = '#141014';
+      const red = '#dc2626';
+      const yellow = '#facc15';
+      if (z <= 3) {
+        rect(ctx, hull, cx - 8 + step, cy - 3, 6, 9);
+        rect(ctx, hull, cx + 2 - step, cy - 3, 6, 9);
+        rect(ctx, yellow, cx - 8 + step, cy + 5, 6, 1);
+        rect(ctx, yellow, cx + 2 - step, cy + 5, 6, 1);
+      } else if (z <= 8) {
+        rect(ctx, hull, cx - 9, cy - 9, 18, 11);
+        rect(ctx, red, cx - 9, cy - 10, 18, 1);
+        rect(ctx, '#3f1414', cx - 11, cy - 12, 5, 7);
+        rect(ctx, '#3f1414', cx + 7, cy - 12, 5, 7);
+        rect(ctx, red, cx - 11, cy - 12, 5, 1);
+        rect(ctx, red, cx + 7, cy - 12, 5, 1);
+        rect(ctx, yellow, cx - 10, cy - 11, 3, 2);
+        rect(ctx, yellow, cx + 8, cy - 11, 3, 2);
       } else {
-        rect(ctx, '#0b0b10', cx - 4, cy - 4, 8, 7);
-        rect(ctx, '#fb923c', cx - 3, cy - 5, 6, 2);
+        rect(ctx, hull, cx - 5, cy - 6, 10, 8);
+        rect(ctx, yellow, cx - 4, cy - 7, 8, 2);
+        rect(ctx, red, cx - 2, cy - 5, 4, 2);
       }
     });
   });
@@ -203,23 +207,62 @@ export interface MaximilianModel {
 }
 
 export function buildMaximilian(): MaximilianModel {
-  const body = layers(10, (ctx, cx, cy, z) => {
-    const w = z < 3 ? 12 : z < 7 ? 16 : 10;
-    rect(ctx, z % 2 ? '#1a1014' : '#0f0a0d', cx - w / 2, cy - w / 2, w, w);
-    rect(ctx, '#991b1b', cx - w / 2, cy - w / 2, w, 1);
-    if (z === 6 || z === 7) {
-      rect(ctx, '#ff1a1a', cx - 2, cy - w / 2 - 1, 4, 3); // glowing eye
-      rect(ctx, '#fecaca', cx - 1, cy - w / 2, 2, 1);
+  // Floating humanoid killer robot: tapered thruster skirt, broad armored
+  // shoulders with articulated sawblade arms, horned crimson helmet + visor.
+  const body = layers(14, (ctx, cx, cy, z) => {
+    const obsidian = '#0a0709';
+    const crimson = '#7f1d1d';
+    const steel = '#1c1917';
+    const glow = '#ff2a2a';
+    if (z <= 3) {
+      const w = 16 - z * 2;
+      rect(ctx, steel, cx - w / 2, cy - 2, w, 6);
+      rect(ctx, crimson, cx - w / 2, cy + 3, w, 1);
+      if (z === 0) {
+        rect(ctx, '#f43f5e', cx - 5, cy + 5, 3, 2);
+        rect(ctx, '#f43f5e', cx + 2, cy + 5, 3, 2);
+        rect(ctx, '#fde68a', cx - 4, cy + 6, 2, 1);
+        rect(ctx, '#fde68a', cx + 3, cy + 6, 2, 1);
+      }
+    } else if (z <= 8) {
+      const broad = z >= 6;
+      const w = broad ? 20 : 14;
+      rect(ctx, obsidian, cx - w / 2, cy - 6, w, 9);
+      rect(ctx, crimson, cx - 10, cy - 7, 5, 3);
+      rect(ctx, crimson, cx + 5, cy - 7, 5, 3);
+      rect(ctx, steel, cx - 11, cy - 2, 3, 6);
+      rect(ctx, steel, cx + 8, cy - 2, 3, 6);
+      rect(ctx, '#dc2626', cx - 11, cy + 3, 3, 1);
+      rect(ctx, '#dc2626', cx + 8, cy + 3, 3, 1);
+      if (z === 7) rect(ctx, glow, cx - 2, cy - 4, 4, 4);
+    } else {
+      const w = z <= 11 ? 12 : 8;
+      rect(ctx, obsidian, cx - w / 2, cy - 5, w, 7);
+      rect(ctx, crimson, cx - w / 2, cy - 6, w, 1);
+      if (z >= 11 && z <= 12) {
+        rect(ctx, glow, cx - 4, cy - 3, 8, 2);
+        rect(ctx, '#fecaca', cx - 3, cy - 3, 6, 1);
+      }
+      if (z === 13) {
+        rect(ctx, crimson, cx - 6, cy - 8, 2, 3);
+        rect(ctx, crimson, cx + 4, cy - 8, 2, 3);
+      }
     }
   });
-  const blades = layers(3, (ctx, cx, cy, z) => {
-    // quad sawblade cross; mid layer widest
-    const len = z === 1 ? 11 : 9;
-    ctx.fillStyle = z === 1 ? '#e5e7eb' : '#94a3b8';
-    ctx.fillRect(cx - len, cy - 1, len * 2, 2);
-    ctx.fillRect(cx - 1, cy - len, 2, len * 2);
-    ctx.fillStyle = '#ef4444';
-    for (const [dx, dy] of [[-len, 0], [len - 2, 0], [0, -len], [0, len - 2]]) ctx.fillRect(cx + dx, cy + dy - 1, 2, 3);
+  const blades = layers(4, (ctx, cx, cy, z) => {
+    // Twin toothed voxel sawblades on articulated arms.
+    const len = z === 1 || z === 2 ? 4 : 3;
+    for (const side of [-1, 1]) {
+      const bx = cx + side * 7;
+      ctx.fillStyle = z % 2 ? '#e5e7eb' : '#94a3b8';
+      ctx.fillRect(bx - 1, cy - len, 2, len * 2);
+      ctx.fillRect(bx - len, cy - 1, len * 2, 2);
+      ctx.fillStyle = '#ef4444';
+      ctx.fillRect(bx - len, cy - 1, 2, 3);
+      ctx.fillRect(bx + len - 2, cy - 1, 2, 3);
+      ctx.fillRect(bx - 1, cy - len, 2, 3);
+      ctx.fillRect(bx - 1, cy + len - 2, 2, 3);
+    }
   });
   return { body, blades };
 }

@@ -14,7 +14,9 @@ import { applyBossDamageToPlayer } from './bossUtils';
 const MAXIMILIAN_BASE_RADIUS = 34;
 const MAXIMILIAN_BLADE_RADIUS = 58;
 const MAXIMILIAN_WHIRLWIND_BLADE_RADIUS = 70;
-const MAXIMILIAN_MAX_HP = 900;
+const MAXIMILIAN_MAX_HP = 1200;
+const MAXIMILIAN_SHIELD_HP = 260;
+const STANDARD_SHOT_SHIELD_DAMAGE = 7;
 
 const STALK_DURATION = 2.6;
 const CHARGE_DURATION = 1.3;
@@ -65,6 +67,10 @@ export function inFrontalBladeArc(boss: BossState, dx: number, dy: number): bool
   return Math.abs(delta) <= BLADE_ARC_HALF_DEG;
 }
 
+export function isMaximilianVulnerable(boss: BossState): boolean {
+  return boss.phase === 'recover' || (boss.shieldHp ?? 0) <= 0 || boss.vulnerable === true;
+}
+
 export function createMaximilian(x: number, y: number): BossState {
   maximilianSeq += 1;
   return {
@@ -99,6 +105,9 @@ export function createMaximilian(x: number, y: number): BossState {
     ],
     bladeAngle: 0,
     bladeRadius: MAXIMILIAN_BLADE_RADIUS,
+    shieldHp: MAXIMILIAN_SHIELD_HP,
+    shieldMaxHp: MAXIMILIAN_SHIELD_HP,
+    vulnerable: false,
     hitFlash: 0,
   };
 }
@@ -164,13 +173,35 @@ export function updateMaximilian(
       boss.phase = 'recover';
       boss.phaseTimer = RECOVER_DURATION;
       boss.bladeRadius = RETRACTED_BLADE_RADIUS;
-      events.push({ type: 'sfx', sound: 'blade_whirr', x: boss.x, y: boss.y });
+      // Blades retract: shield ring collapses, glowing core is exposed.
+      boss.shieldHp = 0;
+      boss.vulnerable = true;
+      events.push({ type: 'sfx', sound: 'shield_break', x: boss.x, y: boss.y });
+      events.push({
+        type: 'voice_taunt',
+        text: 'CORE EXPOSED!',
+        pitch: 0.35,
+        rate: 1.1,
+        speaker: 'maximilian',
+      });
     } else {
       boss.phase = 'stalk';
       boss.phaseTimer = STALK_DURATION;
       boss.bladeRadius = MAXIMILIAN_BLADE_RADIUS;
+      boss.shieldHp = Math.max(boss.shieldHp ?? 0, 40);
+      boss.vulnerable = false;
     }
   }
+
+  // Energy shield regenerates only while the blades are spinning.
+  if (boss.phase !== 'recover') {
+    boss.shieldHp = Math.min(
+      boss.shieldMaxHp ?? MAXIMILIAN_SHIELD_HP,
+      (boss.shieldHp ?? 0) + 26 * dt,
+    );
+    if ((boss.shieldHp ?? 0) > 0) boss.vulnerable = false;
+  }
+  boss.vulnerable = isMaximilianVulnerable(boss);
 
   // Movement & blade spin rate per phase
   let bladeSpinDegPerSec = 360;
@@ -223,25 +254,38 @@ export function updateMaximilian(
     const pdy = p.y - boss.y;
     if (pdx * pdx + pdy * pdy > reach * reach) continue;
 
-    let shred = false;
-    if (boss.phase === 'whirlwind') {
-      shred = !projectileBypassesBlades(p);
-    } else {
-      // stalk / charge: only the frontal blade arc blocks standard fire
-      shred = inFrontalBladeArc(boss, pdx, pdy);
-    }
-    if (!shred) continue;
+    // Heavy/piercing rounds punch through (survive) but still hammer the
+    // shield meter; standard bolts are deflected and destroyed.
+    const heavy = projectileBypassesBlades(p);
+    const frontal = inFrontalBladeArc(boss, pdx, pdy);
+    const interacts = boss.phase === 'whirlwind' || heavy || frontal;
+    if (!interacts) continue;
 
-    p.life = 0;
-    events.push({ type: 'sfx', sound: 'blade_whirr', x: p.x, y: p.y });
+    // Visible deflection: bright sparks + metallic clang. Heavy/piercing shots
+    // punch through and drain the shield meter; standard bolts simply bounce.
+    boss.shieldHp = Math.max(
+      0,
+      (boss.shieldHp ?? 0) - (heavy ? p.damage : STANDARD_SHOT_SHIELD_DAMAGE),
+    );
+    events.push({ type: 'sfx', sound: 'electric_zap', x: p.x, y: p.y });
     events.push({
       type: 'vfx_explosion',
       x: p.x,
       y: p.y,
       z: p.z,
-      color: '#ff3355',
+      color: heavy ? '#67e8f9' : '#ff3355',
       count: 6,
     });
+    if (!heavy) p.life = 0;
+
+    if ((boss.shieldHp ?? 0) <= 0) {
+      // Shield depleted: blades retract into a clearly telegraphed window.
+      boss.phase = 'recover';
+      boss.phaseTimer = RECOVER_DURATION;
+      boss.bladeRadius = RETRACTED_BLADE_RADIUS;
+      boss.vulnerable = true;
+      events.push({ type: 'sfx', sound: 'shield_break', x: boss.x, y: boss.y });
+    }
   }
 
   // 2. Whirling blades shred destructible tech crates/cover

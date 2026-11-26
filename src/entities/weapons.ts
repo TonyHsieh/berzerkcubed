@@ -303,6 +303,21 @@ export interface WeaponSwapOutcome {
 }
 
 /**
+ * Milestone 4.1: whether a walk-over weapon pickup should be collected without
+ * pressing [F]. True when the hero already carries that type (auto-upgrade) or
+ * still has an open slot. Only a full inventory of three distinct weapons is
+ * held back for an explicit swap.
+ */
+export function shouldAutoCollectWeapon(
+  player: PlayerState,
+  weaponType: WeaponType,
+): boolean {
+  const slots = ensureWeaponSlots(player);
+  if (slots.some((slot) => slot?.primary === weaponType)) return true;
+  return slots.some((slot) => slot === null);
+}
+
+/**
  * `F` near a dropped weapon: level up a carried copy, equip into an empty slot,
  * or swap with the active slot and hand back the replaced weapon for dropping.
  */

@@ -275,9 +275,13 @@ export interface BossState {
   phase: string;
   phaseTimer: number;
   parts: BossPart[];
-  // Maximilian blade spin
+  // Maximilian blade spin / blade-shield meter
   bladeAngle: number;
   bladeRadius: number;
+  shieldHp?: number;
+  shieldMaxHp?: number;
+  /** True while the boss can be damaged (blades retracted / shield broken). */
+  vulnerable?: boolean;
   // Recogniser sky-slam shadow telegraph
   slamTargetX?: number;
   slamTargetY?: number;

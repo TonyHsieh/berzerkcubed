@@ -165,24 +165,21 @@ function renderIslandWorld(
 
     const panelColor = open >= 0.75 ? 'rgba(34, 211, 238, 0.25)' : '#0f172a';
     const panelEdge = open >= 0.75 ? '#22d3ee' : '#f59e0b';
-    const extrude = 7;
     const drawDoorPanel = (px: number, py: number, pw: number, ph: number): void => {
-      // Extruded 3D sliding door block with a glowing top rim.
-      ctx.fillStyle = '#0b1220';
-      ctx.beginPath();
-      ctx.moveTo(px, py); ctx.lineTo(px - extrude, py - extrude);
-      ctx.lineTo(px - extrude, py + ph - extrude); ctx.lineTo(px, py + ph);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = panelColor;
-      ctx.fillRect(px, py, pw, ph);
-      ctx.strokeStyle = panelEdge;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px, py, pw, ph);
-      ctx.fillStyle = open >= 0.75 ? 'rgba(34, 211, 238, 0.4)' : '#1e293b';
-      ctx.beginPath();
-      ctx.moveTo(px - extrude, py - extrude); ctx.lineTo(px + pw - extrude, py - extrude);
-      ctx.lineTo(px + pw, py); ctx.lineTo(px, py);
-      ctx.closePath(); ctx.fill(); ctx.stroke();
+      // Milestone 4.1 Fix 4: synchronized doors use the same upright vertical
+      // Z-stack as walls (no lateral skew).
+      const doorLayers = 6;
+      const doorStep = 2;
+      for (let z = 0; z < doorLayers; z++) {
+        const inset = z;
+        const y = py - z * doorStep;
+        const layerW = Math.max(1, pw - inset * 2);
+        ctx.fillStyle = z === doorLayers - 1 ? panelColor : '#0b1220';
+        ctx.fillRect(px + inset, y, layerW, ph);
+        ctx.strokeStyle = z === doorLayers - 1 ? panelEdge : 'rgba(56, 189, 248, 0.28)';
+        ctx.lineWidth = z === doorLayers - 1 ? 2 : 1;
+        ctx.strokeRect(px + inset, y, layerW, ph);
+      }
     };
 
     if (closedFrac > 0.02) {
@@ -263,69 +260,84 @@ function drawWall3D(
 ): void {
   const segW = wall.w;
   const segD = wall.h;
-  const lift = Math.max(10, wall.heightZ * zScale);
-  const ex = -lift * 0.32; // fake-isometric lateral offset of the top face
+  // Milestone 4.1 Fix 4: true vertical Approach B Z-stack. No lateral `ex`
+  // skew — every layer lifts strictly in screen -Y, like drawStack().
+  const stepCount = 10;
+  const spacingPx = Math.max(1.2, (wall.heightZ * zScale) / stepCount);
+  const rad = (camAngleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const localCorners: Array<[number, number]> = [
+    [-segW / 2, -segD / 2],
+    [segW / 2, -segD / 2],
+    [segW / 2, segD / 2],
+    [-segW / 2, segD / 2],
+  ];
+  const poly = localCorners.map(([x, y]) => ({
+    x: x * cos - y * sin,
+    y: x * sin + y * cos,
+  }));
+  const neon = wall.electrified ? '#f43f5e' : outlineColor;
 
   ctx.save();
   ctx.translate(screenX, screenY);
-  ctx.rotate((camAngleDeg * Math.PI) / 180);
 
-  const baseX = -segW / 2;
-  const baseY = -segD / 2;
-  const topX = baseX + ex;
-  const topY = baseY - lift;
+  for (let z = 0; z < stepCount; z++) {
+    const lift = z * spacingPx;
+    const t = z / (stepCount - 1);
+    ctx.beginPath();
+    for (let i = 0; i < poly.length; i++) {
+      if (i === 0) ctx.moveTo(poly[i].x, poly[i].y - lift);
+      else ctx.lineTo(poly[i].x, poly[i].y - lift);
+    }
+    ctx.closePath();
+    const shade = Math.round(10 + t * 26);
+    ctx.fillStyle = wall.electrified
+      ? `rgb(${shade + 14}, 8, ${shade + 6})`
+      : `rgb(8, ${shade}, ${shade + 20})`;
+    ctx.fill();
+    ctx.strokeStyle = neon;
+    ctx.globalAlpha = z === stepCount - 1 ? 0.95 : 0.32;
+    ctx.lineWidth = z === stepCount - 1 ? 2 : 1;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 
-  // Left + right side faces (visible extruded depth).
-  ctx.fillStyle = wall.electrified ? '#2a0f1a' : '#0b1524';
-  ctx.beginPath();
-  ctx.moveTo(baseX, baseY); ctx.lineTo(topX, topY);
-  ctx.lineTo(topX, topY + segD); ctx.lineTo(baseX, baseY + segD);
-  ctx.closePath(); ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(baseX + segW, baseY); ctx.lineTo(topX + segW, topY);
-  ctx.lineTo(topX + segW, topY + segD); ctx.lineTo(baseX + segW, baseY + segD);
-  ctx.closePath(); ctx.fill();
-
-  // Front face with neon outline.
-  ctx.fillStyle = wall.electrified ? '#1b1124' : '#0d1526';
-  ctx.fillRect(baseX, baseY, segW, segD);
-  ctx.strokeStyle = wall.electrified ? '#f43f5e' : outlineColor;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(baseX, baseY, segW, segD);
-
-  // Glowing top face + rim.
-  ctx.shadowColor = wall.electrified ? '#f43f5e' : outlineColor;
+  // Bright neon top cap.
+  ctx.save();
+  ctx.shadowColor = neon;
   ctx.shadowBlur = 12;
-  ctx.fillStyle = wall.electrified ? '#3b1220' : '#12243d';
+  ctx.strokeStyle = neon;
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(topX, topY); ctx.lineTo(topX + segW, topY);
-  ctx.lineTo(topX + segW + ex, topY + segD); ctx.lineTo(topX + ex, topY + segD);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.shadowBlur = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const ly = poly[i].y - (stepCount - 1) * spacingPx;
+    if (i === 0) ctx.moveTo(poly[i].x, ly);
+    else ctx.lineTo(poly[i].x, ly);
+  }
+  ctx.closePath();
+  ctx.stroke();
+  ctx.restore();
 
   if (wall.electrified) {
-    // Animated 3D vertical plasma arcs crawling along the extruded faces.
+    // Glowing plasma arcs climbing the vertical stack.
     const flicker = 0.65 + 0.35 * Math.sin(elapsedTime * 28 + index * 3.1);
     ctx.shadowColor = '#67e8f9';
-    ctx.shadowBlur = 16;
+    ctx.shadowBlur = 14;
     ctx.strokeStyle = flicker > 0.8 ? '#fef08a' : '#67e8f9';
     ctx.lineWidth = 2;
-    const arcs = Math.max(1, Math.floor(segW / 16));
+    const arcs = Math.max(1, Math.floor(segW / 18));
     for (let a = 0; a < arcs; a++) {
-      const ax = baseX + ((a + 0.5) * segW) / arcs;
+      const bx = -segW / 2 + ((a + 0.5) * segW) / arcs;
+      const by = -segD / 2;
+      const px = bx * cos - by * sin;
+      const py = bx * sin + by * cos;
       ctx.beginPath();
-      ctx.moveTo(ax, baseY + segD);
-      const steps = 6;
-      for (let s = 1; s < steps; s++) {
-        const jitter = Math.sin(elapsedTime * 42 + s * 6.7 + a + index) * 2.6;
-        ctx.lineTo(ax + jitter, baseY + (segD * s) / steps);
+      ctx.moveTo(px, py);
+      for (let s = 1; s <= 5; s++) {
+        const jitter = Math.sin(elapsedTime * 42 + s * 6.7 + a + index) * 2.4;
+        ctx.lineTo(px + jitter, py - ((stepCount - 1) * spacingPx * s) / 5);
       }
-      ctx.lineTo(ax + ex, topY);
-      ctx.stroke();
-      // Energy bar on the top rim
-      ctx.beginPath();
-      ctx.moveTo(ax + ex, topY + 1);
-      ctx.lineTo(ax + ex + 2, topY + 1);
       ctx.stroke();
     }
     ctx.shadowBlur = 0;
@@ -509,6 +521,28 @@ function drawBoss(
     ctx.arc(screenX, screenY - zLift - 8, boss.bladeRadius, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
+
+    // Milestone 4.1 Fix 6: bright crimson/magenta energy shield ring makes it
+    // obvious why standard bolts are bouncing off the spinning blades.
+    if (boss.phase !== 'recover' && (boss.shieldHp ?? 0) > 0) {
+      const shieldFrac = (boss.shieldHp ?? 0) / Math.max(1, boss.shieldMaxHp ?? 1);
+      const shimmer = 0.5 + 0.5 * Math.sin(elapsedTime * 9);
+      ctx.save();
+      ctx.shadowColor = '#f43f5e';
+      ctx.shadowBlur = 18;
+      ctx.strokeStyle = `rgba(244, 63, 94, ${(0.45 + shieldFrac * 0.4 + shimmer * 0.1).toFixed(2)})`;
+      ctx.lineWidth = 3 + shieldFrac * 2;
+      ctx.beginPath();
+      ctx.arc(screenX, screenY - zLift - 8, boss.bladeRadius + 7, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = `rgba(255, 228, 230, ${(0.25 + shimmer * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(screenX, screenY - zLift - 8, boss.bladeRadius + 11, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Pulsing exposed core telegraphs the fully-vulnerable recovery window.
     if (boss.phase === 'recover') {
       const pulse = 0.5 + 0.5 * Math.sin(elapsedTime * 16);
@@ -518,6 +552,10 @@ function drawBoss(
       ctx.beginPath();
       ctx.arc(screenX, screenY - zLift - 14, 9 + pulse * 7, 0, Math.PI * 2);
       ctx.stroke();
+      ctx.fillStyle = `rgba(254, 240, 138, ${(0.7 + pulse * 0.3).toFixed(2)})`;
+      ctx.font = 'bold 11px ui-monospace, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('VULNERABLE!', screenX, screenY - zLift - 36);
       ctx.restore();
     }
     return;

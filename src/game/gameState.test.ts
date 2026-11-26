@@ -4,6 +4,12 @@ import { createEnforcer } from '../enemies/enforcer';
 import { createGrenadier, createLaserShooter } from '../enemies/shooter';
 import { createDefaultInputState } from '../engine/input';
 import type { GameEvent, Projectile } from '../engine/types';
+import {
+  INITIAL_VANGUARD_MAX,
+  INITIAL_VANGUARD_MIN,
+  SAFE_SPAWN_CLEARANCE,
+  spawnHordeWave,
+} from '../enemies/spawner';
 import { applyWeaponPickupToSlots } from '../entities/weapons';
 import { createCrate } from '../world/crate';
 import {
@@ -21,6 +27,9 @@ describe('Milestone 3 Integration — Full Headless Simulation Loop', () => {
       maxShootersAndGrenadiers: 80,
     });
     const state = createGameState(config);
+    // This stress test seeds its own 300 enemies; clear the Milestone 4.1
+    // opening vanguard so the population assertion stays exact.
+    state.enemies.length = 0;
     // Keep player invulnerable during swarm stress test so test stays focused on 300-unit simulation
     state.player.invulnTimer = 10;
 
@@ -402,5 +411,81 @@ describe('Milestone 3 Integration — Full Headless Simulation Loop', () => {
         (pickup) => pickup.kind === 'weapon' && pickup.weaponType === activeBefore,
       ),
     ).toBe(true);
+  });
+});
+
+describe('Milestone 4.1 — Safe spawn & effortless pickups', () => {
+  it('opens with a small vanguard entirely outside the 260px hero bubble', () => {
+    const state = createGameState(createDifficultyConfig());
+    expect(state.enemies.length).toBeGreaterThanOrEqual(INITIAL_VANGUARD_MIN);
+    expect(state.enemies.length).toBeLessThanOrEqual(INITIAL_VANGUARD_MAX);
+    for (const e of state.enemies) {
+      expect(Math.hypot(e.x - state.player.x, e.y - state.player.y)).toBeGreaterThanOrEqual(
+        SAFE_SPAWN_CLEARANCE - 0.001,
+      );
+    }
+  });
+
+  it('routes later waves through gates without spawning inside the safe radius', () => {
+    const state = createGameState(createDifficultyConfig());
+    state.enemies.length = 0;
+    const wave = spawnHordeWave(
+      state.island,
+      state.enemies,
+      state.config,
+      0,
+      {
+        heroX: state.player.x,
+        heroY: state.player.y,
+        clearance: SAFE_SPAWN_CLEARANCE,
+      },
+    );
+    expect(wave.length).toBeGreaterThan(0);
+    for (const e of wave) {
+      expect(Math.hypot(e.x - state.player.x, e.y - state.player.y)).toBeGreaterThanOrEqual(
+        SAFE_SPAWN_CLEARANCE - 0.001,
+      );
+    }
+  });
+
+  it('auto-collects a weapon into an open slot on walk-over without F', () => {
+    const state = createGameStateForSector(0, createDifficultyConfig());
+    state.enemies.length = 0;
+    state.waveIndex = state.wavesPerSector;
+    state.bossSpawned = true;
+    state.pickups.push({
+      id: 'auto_open',
+      x: state.player.x,
+      y: state.player.y,
+      z: 0,
+      kind: 'weapon',
+      weaponType: 'spread',
+      life: 10,
+    });
+    stepGameState(state, createDefaultInputState(), FIXED_DT);
+    expect(state.player.weapon.primary).toBe('spread');
+    expect(state.pickups).toHaveLength(0);
+    expect(state.toast?.text).toContain('AUTO-EQUIPPED');
+  });
+
+  it('auto-upgrades a duplicate weapon on walk-over without F', () => {
+    const state = createGameStateForSector(0, createDifficultyConfig());
+    state.enemies.length = 0;
+    state.waveIndex = state.wavesPerSector;
+    state.bossSpawned = true;
+    state.pickups.push(
+      {
+        id: 'auto_dup_1', x: state.player.x, y: state.player.y, z: 0,
+        kind: 'weapon', weaponType: 'pulse_rifle', life: 10,
+      },
+      {
+        id: 'auto_dup_2', x: state.player.x, y: state.player.y, z: 0,
+        kind: 'weapon', weaponType: 'pulse_rifle', life: 10,
+      },
+    );
+    stepGameState(state, createDefaultInputState(), FIXED_DT);
+    expect(state.player.weapon.primary).toBe('pulse_rifle');
+    expect(state.player.weapon.level).toBe(3);
+    expect(state.pickups).toHaveLength(0);
   });
 });

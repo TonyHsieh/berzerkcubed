@@ -96,6 +96,13 @@ export function createHud(
     <div style="height:10px;background:#1f0a10;border:1px solid #ef4444;margin-bottom:6px;">
       <div id="hud-boss-bar" style="height:100%;width:100%;background:linear-gradient(90deg,#ef4444,#f97316);"></div>
     </div>
+    <div id="hud-boss-shield-row" style="display:none;font-size:10px;color:#22d3ee;margin-bottom:4px;">
+      BLADE SHIELD <span id="hud-boss-shield-val">0 / 0</span>
+    </div>
+    <div id="hud-boss-shield-track" style="display:none;height:7px;background:#08202a;border:1px solid #22d3ee;margin-bottom:6px;">
+      <div id="hud-boss-shield-bar" style="height:100%;width:100%;background:linear-gradient(90deg,#0ea5e9,#fb923c);"></div>
+    </div>
+    <div id="hud-boss-vulnerable" style="display:none;font-size:12px;color:#fef08a;text-align:center;letter-spacing:3px;text-shadow:0 0 10px #facc15;margin-bottom:4px;">VULNERABLE!</div>
     <div id="hud-boss-parts" style="font-size:10px;color:#fca5a5;display:flex;gap:8px;flex-wrap:wrap;"></div>
   `;
   container.appendChild(bossBox);
@@ -192,6 +199,11 @@ export function createHud(
   const bossNameEl = $<HTMLSpanElement>('hud-boss-name');
   const bossHpEl = $<HTMLSpanElement>('hud-boss-hp');
   const bossBarEl = $<HTMLDivElement>('hud-boss-bar');
+  const bossShieldRowEl = $<HTMLDivElement>('hud-boss-shield-row');
+  const bossShieldTrackEl = $<HTMLDivElement>('hud-boss-shield-track');
+  const bossShieldValEl = $<HTMLSpanElement>('hud-boss-shield-val');
+  const bossShieldBarEl = $<HTMLDivElement>('hud-boss-shield-bar');
+  const bossVulnerableEl = $<HTMLDivElement>('hud-boss-vulnerable');
   const bossPartsEl = $<HTMLDivElement>('hud-boss-parts');
   const sectorEl = $<HTMLDivElement>('hud-sector');
   const scoreEl = $<HTMLSpanElement>('hud-score');
@@ -339,6 +351,18 @@ export function createHud(
         bossNameEl.textContent = b.reconstructing ? `${b.name} [RECONSTRUCTING]` : b.name;
         bossHpEl.textContent = `${Math.ceil(b.hp)} / ${b.maxHp}`;
         bossBarEl.style.width = `${Math.max(0, Math.min(100, (b.hp / Math.max(1, b.maxHp)) * 100))}%`;
+
+        // Milestone 4.1 Fix 6: blade-shield meter + clear vulnerability tell.
+        const shieldMax = b.shieldMaxHp ?? 0;
+        const hasShield = shieldMax > 0;
+        bossShieldRowEl.style.display = hasShield ? 'block' : 'none';
+        bossShieldTrackEl.style.display = hasShield ? 'block' : 'none';
+        if (hasShield) {
+          bossShieldValEl.textContent = `${Math.ceil(b.shieldHp ?? 0)} / ${shieldMax}`;
+          bossShieldBarEl.style.width = `${Math.max(0, Math.min(100, ((b.shieldHp ?? 0) / shieldMax) * 100))}%`;
+        }
+        bossVulnerableEl.style.display = b.vulnerable ? 'block' : 'none';
+
         if (b.parts.length > 1) {
           bossPartsEl.innerHTML = b.parts
             .map((part) => {

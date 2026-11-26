@@ -6,7 +6,7 @@ import type {
   Projectile,
 } from '../engine/types';
 import { createEvilOtto, updateEvilOtto } from './evilOtto';
-import { createMaximilian, updateMaximilian } from './maximilian';
+import { createMaximilian, isMaximilianVulnerable, updateMaximilian } from './maximilian';
 import {
   createRecogniser,
   damageBossPart,
@@ -449,5 +449,55 @@ describe('Evil Otto (Sinistar-Style Taunt & Mega Man-Style Returning Variants)',
     );
     // Vortex-Otto pulls player closer during ability phase
     expect(vortexRun.player.x).toBeLessThan(vortexRun.startPlayerX);
+  });
+});
+
+describe('Milestone 4.1 Fix 6 — Maximilian blade-shield & vulnerability', () => {
+  it('starts shielded and only exposes the core while blades are retracted', () => {
+    const boss = createMaximilian(400, 400);
+    expect(boss.maxHp).toBeGreaterThanOrEqual(1200);
+    expect(boss.shieldHp).toBe(boss.shieldMaxHp);
+    expect(isMaximilianVulnerable(boss)).toBe(false);
+
+    boss.phase = 'recover';
+    boss.shieldHp = 0;
+    expect(isMaximilianVulnerable(boss)).toBe(true);
+  });
+
+  it('drains the shield with sustained fire and opens a recover window', () => {
+    const boss = createMaximilian(400, 400);
+    boss.phase = 'whirlwind';
+    boss.phaseTimer = 20;
+    boss.bladeRadius = 70;
+    const player = makePlayer(600, 400);
+    const island = makeIsland({ crates: [] });
+    const events: GameEvent[] = [];
+    const shieldMax = boss.shieldMaxHp ?? 260;
+
+    // Repeated frontal standard bolts chip away at the meter until it breaks.
+    for (let i = 0; i < 60 && !isMaximilianVulnerable(boss); i++) {
+      const bolt = makeTestProjectile(`chip_${i}`, 440, 400);
+      updateMaximilian(boss, player, island, [bolt], 0.05, events);
+      boss.phase = 'whirlwind';
+      boss.phaseTimer = 20;
+    }
+    expect(boss.shieldHp).toBeLessThan(shieldMax);
+    expect(events.some((e) => e.type === 'sfx' && e.sound === 'electric_zap')).toBe(true);
+  });
+
+  it('heavy rounds survive the guard and drain more shield than bolts', () => {
+    const boss = createMaximilian(400, 400);
+    boss.phase = 'whirlwind';
+    boss.phaseTimer = 20;
+    boss.bladeRadius = 70;
+    const player = makePlayer(600, 400);
+    const island = makeIsland({ crates: [] });
+    const events: GameEvent[] = [];
+    const before = boss.shieldHp ?? 0;
+
+    const beam = makeTestProjectile('beam_drain', 450, 400, { kind: 'beam_segment', damage: 40 });
+    updateMaximilian(boss, player, island, [beam], 0.05, events);
+    expect(beam.life).toBeGreaterThan(0);
+    expect(boss.shieldHp).toBeLessThan(before);
   });
 });

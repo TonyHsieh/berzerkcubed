@@ -113,3 +113,31 @@ Every agent appends a short entry here when completing a milestone, feature, or 
 - **Verification & Regression Proof** (Nix devShell, `nix develop --impure --command sh -c 'pnpm run build && pnpm test'`):
   - `pnpm run build` (`tsc --noEmit && vite build`): **PASSED** (0 TypeScript errors, 995 modules transformed).
   - `pnpm test` (`vitest run`): **PASSED** — **13 test files, 73/73 tests** (61 prior + 12 new: +3 Maximilian, +4 gamepad, +4 weapon slots, +1 loading).
+
+---
+
+## Milestone 4.1 — Playtest Fixes (`t_2408d038`, `main`)
+
+Spec: `docs/specs/milestone-4.1-fixes.md` (plan-only; synthesizer will replace with the as-built report).
+
+- **Files created**:
+  - `src/world/levelData.test.ts` — 4 tests: seed reproducibility, seed variation, 300px spawn clearance from walls/crates, gate/door/electrified-wall invariants.
+  - `src/game/gallery.ts` — `isGalleryEnabled(search)`, `createModelGallery({models, cache})`: `?gallery=1` modal with 5× rotating turntables of all nine Approach B model groups, [G]/Esc toggle.
+- **Files modified**:
+  - `index.html` — inline `#loading-screen` neon thermometer painted at t=0ms (0% — LOADING ENGINE MODULES...) with animated shimmer; Bootstrap CSS and markup require zero JS.
+  - `src/main.ts` — dynamic `import()` of loading/difficulty/input/gameState/hud/renderer *after* first paint; staged 0→25→92→100% progress; gallery opt-in wiring.
+  - `src/game/loading.ts` — 4 named `LOAD_STAGES`; `createLoadingScreen()` now reuses the inline DOM element (backfills it for headless/minimal hosts) instead of creating a blank flash.
+  - `src/world/levelData.ts` — `createSectorIsland(sectorIndex, seed?)` with mulberry32 PRNG; seeded wall baffles/pylons, door offsets, crate clusters, bridge activation; `SPAWN_CLEAR_RADIUS = 300` keeps the hero spawn area clear.
+  - `src/enemies/spawner.ts` — `SAFE_SPAWN_CLEARANCE = 260`, `HordeSpawnOptions`, `safeSpawnPoint()` pushes gate spawns outside the hero bubble, `vanguard` option spawns a 5–8 far-away opening squad.
+  - `src/game/gameState.ts` — sector start spawns the vanguard; wave spawns pass hero clearance + gate telegraph; weapon pickups auto-collect into open slots / auto-upgrade duplicates, [F] only for a full 3-slot distinct inventory.
+  - `src/entities/weapons.ts` — exported `shouldAutoCollectWeapon(player, type)`.
+  - `src/game/renderer.ts` — `drawWall3D()` and sliding doors rebuilt as true vertical Approach B Z-stacks (no lateral `ex` skew), 10 crisp layers, bright top caps and climbing plasma arcs; Maximilian shield ring + floating VULNERABLE! indicator.
+  - `src/render/models.ts` — distinct 12-layer Enforcer (lean soldier + batons), Laser Shooter (tripod/amber barrel/crest), Grenadier (squat twin mortars); rebuilt Maximilian as a floating horned killer robot with twin sawblade arms.
+  - `src/bosses/maximilian.ts` — `isMaximilianVulnerable`, 1200 HP / 260 regenerating blade-shield meter, deflect sparks + SFX, heavy/piercing meter drain, shield-break → recover window, `CORE EXPOSED!` taunt.
+  - `src/engine/types.ts` — `BossState` gained optional `shieldHp`, `shieldMaxHp`, `vulnerable`.
+  - `src/game/hud.ts` — secondary cyan/orange blade-shield bar and `VULNERABLE!` boss status.
+  - Tests updated: `src/game/gameState.test.ts`, `src/entities/weapons.test.ts`, `src/bosses/bosses.test.ts`, `src/game/loading.test.ts`, `src/world/worldSim.test.ts`.
+- **Verification & Regression Proof**:
+  - `pnpm run build`: **PASSED** — 0 TypeScript errors, 996 modules, inline boot screen + 12 dynamic chunks.
+  - `pnpm test`: **PASSED** — **14 test files, 88/88 tests** (73 prior + 15 new).
+  - HTTP smoke test: `vite preview` served the built `index.html` with all inline boot markers and all 13 JS chunks at HTTP 200. (Real-browser CDP navigation was unavailable in this runner, so no in-browser console assertion is claimed.)

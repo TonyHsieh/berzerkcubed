@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { fakeCanvasFactory } from '../render/testCanvas';
 import { setCanvasFactory } from '../render/spriteStack';
+import { isGalleryEnabled } from './gallery';
 import { bootstrapAssets, LOAD_STAGES } from './loading';
 
 describe('Async loading thermometer & chunked asset baking (Milestone 4)', () => {
@@ -34,5 +35,22 @@ describe('Async loading thermometer & chunked asset baking (Milestone 4)', () =>
     } finally {
       setCanvasFactory(null);
     }
+  });
+});
+
+describe('Milestone 4.1 — instant boot screen & sprite inspector', () => {
+  it('names all four real boot stages for the inline thermometer', () => {
+    expect(LOAD_STAGES).toHaveLength(4);
+    expect(LOAD_STAGES[0]).toContain('LOADING ENGINE');
+    expect(LOAD_STAGES[1]).toContain('VOXEL STACKS');
+    expect(LOAD_STAGES[2]).toContain('24-ANGLE');
+    expect(LOAD_STAGES[3]).toContain('CIRCUIT GRID');
+  });
+
+  it('opens the model gallery only for ?gallery=1', () => {
+    expect(isGalleryEnabled('?gallery=1')).toBe(true);
+    expect(isGalleryEnabled('?gallery=1&debug=1')).toBe(true);
+    expect(isGalleryEnabled('')).toBe(false);
+    expect(isGalleryEnabled('?gallery=0')).toBe(false);
   });
 });
