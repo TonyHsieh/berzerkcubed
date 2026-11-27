@@ -134,8 +134,10 @@ export function createLoadingScreen(): LoadingScreen {
     setProgress,
     finish() {
       setProgress(1, 'READY');
-      root!.style.opacity = '0';
-      window.setTimeout(() => root!.remove(), 260);
+      window.setTimeout(() => {
+        root!.style.opacity = '0';
+        window.setTimeout(() => root!.remove(), 260);
+      }, 160);
     },
     destroy() {
       root!.remove();

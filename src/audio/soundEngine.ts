@@ -69,6 +69,8 @@ export class SoundEngine {
   private _paused = false;
   private _lastFadeSec = 0;
   private _bossHpRatio = 1;
+  private _lastAppliedBpm = LEVEL_BASE_BPM;
+  private _lastBpmRampEndAt = -Infinity;
   muted = false;
   bassEnabled = false;
 
@@ -91,12 +93,24 @@ export class SoundEngine {
   /**
    * Milestone 4.16: Scales Boss Danger music tempo proportionally as active boss HP
    * drops from 1.0 -> 0.0 (148 BPM -> ~210 BPM / ~1.42x). Clamped to [0, 1].
+   * Throttled & deduplicated so Tone.js Transport.bpm (TickParam Timeline) never
+   * accumulates overlapping 60 Hz ramps that can hang TickSource.forEachTickBetween.
    */
   setBossHpRatio(ratio: number): void {
     const clamped = Number.isFinite(ratio) ? Math.max(0, Math.min(1, ratio)) : 1;
     this._bossHpRatio = clamped;
     if (this._musicMode === 'boss' && this.Tone && this.musicRig) {
-      this.Tone.getTransport().bpm.rampTo(this.getBossTempoBpm(), 0.2);
+      const targetBpm = this.getBossTempoBpm();
+      const now = this.Tone.now();
+      if (
+        Math.abs(targetBpm - this._lastAppliedBpm) >= 1.0 &&
+        now >= this._lastBpmRampEndAt
+      ) {
+        const rampSec = 0.2;
+        this.Tone.getTransport().bpm.rampTo(targetBpm, rampSec);
+        this._lastAppliedBpm = targetBpm;
+        this._lastBpmRampEndAt = now + rampSec + 0.05;
+      }
     }
   }
 
@@ -226,7 +240,11 @@ export class SoundEngine {
       this.ensureTransportStarted();
     }
     const targetBpm = mode === 'boss' ? this.getBossTempoBpm() : LEVEL_BASE_BPM;
-    this.Tone.getTransport().bpm.rampTo(targetBpm, safeFade);
+    if (Math.abs(targetBpm - this._lastAppliedBpm) >= 0.1) {
+      this.Tone.getTransport().bpm.rampTo(targetBpm, safeFade);
+      this._lastAppliedBpm = targetBpm;
+      this._lastBpmRampEndAt = this.Tone.now() + safeFade + 0.05;
+    }
 
     const levelTarget = mode === 'level' ? LEVEL_GAIN_TARGET : 0;
     const bossTarget = mode === 'boss' ? BOSS_GAIN_TARGET : 0;

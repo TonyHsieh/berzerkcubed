@@ -2,7 +2,11 @@
 // Enable with ?gallery=1. Renders enlarged rotating Approach B turntables of
 // every model so silhouettes can be visually approved up close.
 import type { ModelSet } from '../render/models';
-import { DEFAULT_SLICE_PITCH_Y, drawStack } from '../render/spriteStack';
+import {
+  DEFAULT_SLICE_PITCH_Y,
+  drawStack,
+  getEntitySpacingMultiplier,
+} from '../render/spriteStack';
 import type { SpriteStackCache } from '../render/spriteStack';
 
 export function isGalleryEnabled(search: string): boolean {
@@ -14,7 +18,8 @@ export function isGalleryEnabled(search: string): boolean {
 export const GALLERY_MIN_SPACING = 1.0;
 export const GALLERY_MAX_SPACING = 8.0;
 export const GALLERY_SPACING_STEP = 0.1;
-export const GALLERY_DEFAULT_SPACING = 3.4;
+/** Exact in-game BASE_LAYER_SPACING (camera.layerSpacing 2.0 * PITCH_Z_MULTIPLIER 1.4). */
+export const GALLERY_DEFAULT_SPACING = 2.8;
 export const GALLERY_MANUAL_ROTATE_DEG_PER_SEC = 110;
 export const GALLERY_AUTO_SPIN_DEG_PER_SEC = 27;
 
@@ -127,7 +132,30 @@ export interface GalleryHandle {
 
 interface GalleryEntry {
   label: string;
+  kind: string;
+  /** Scale used when rendering this entity in gameplay (renderer.ts / models.ts). */
+  inGameScale: number;
+  /** Extra spacing multiplier used in gameplay (e.g. 1.5 for bosses, 1.6 for Recogniser). */
+  inGameSpacingMult: number;
+  /** Enlarged turntable display scale that fits cleanly inside the 180x180 gallery card. */
+  galleryScale: number;
   slices: () => HTMLCanvasElement[];
+}
+
+/**
+ * Computes the gallery card's layer spacing so its 3D height-to-width aspect ratio
+ * (`spacing / scale`) matches the exact in-game renderer for each entity kind.
+ */
+export function computeGalleryCardSpacing(
+  baseSpacingPx: number,
+  kind: string,
+  inGameScale: number,
+  inGameSpacingMult: number,
+  galleryScale: number,
+): number {
+  const inGameSpacing =
+    baseSpacingPx * getEntitySpacingMultiplier(kind) * inGameSpacingMult;
+  return inGameSpacing * (galleryScale / Math.max(0.1, inGameScale));
 }
 
 function syntheticWallSlices(): HTMLCanvasElement[] {
@@ -164,35 +192,43 @@ function combineRecogniserLegs(left: HTMLCanvasElement[], right: HTMLCanvasEleme
 
 function entries(models: ModelSet): GalleryEntry[] {
   return [
-    { label: 'HERO', slices: () => [...models.hero.legsIdle, ...models.hero.torso] },
-    { label: 'RED ROBOT (ENFORCER)', slices: () => models.enforcer[0] },
-    { label: 'RED V-BOT (MELEE)', slices: () => models.vBotMelee[0] },
-    { label: 'YELLOW V-BOT (LASER)', slices: () => models.vBotLaser[0] },
-    { label: 'LASER SHOOTER', slices: () => models.laserShooter[0] },
-    { label: 'GRENADIER', slices: () => models.grenadier[0] },
-    { label: 'MAXIMILIAN', slices: () => [...models.maximilian.body, ...models.maximilian.blades] },
+    { label: 'HERO', kind: 'hero', inGameScale: 2.0, inGameSpacingMult: 1.0, galleryScale: 3.2, slices: () => [...models.hero.legsIdle, ...models.hero.torso] },
+    { label: 'RED ROBOT (ENFORCER)', kind: 'enforcer_melee', inGameScale: 2.0, inGameSpacingMult: 1.0, galleryScale: 3.2, slices: () => models.enforcer[0] },
+    { label: 'RED V-BOT (MELEE)', kind: 'v_bot_melee', inGameScale: 2.0, inGameSpacingMult: 1.0, galleryScale: 3.2, slices: () => models.vBotMelee[0] },
+    { label: 'YELLOW V-BOT (LASER)', kind: 'v_bot_laser', inGameScale: 2.0, inGameSpacingMult: 1.0, galleryScale: 3.2, slices: () => models.vBotLaser[0] },
+    { label: 'LASER SHOOTER', kind: 'laser_shooter', inGameScale: 2.0, inGameSpacingMult: 1.0, galleryScale: 3.2, slices: () => models.laserShooter[0] },
+    { label: 'GRENADIER', kind: 'grenadier', inGameScale: 2.0, inGameSpacingMult: 1.0, galleryScale: 3.2, slices: () => models.grenadier[0] },
+    { label: 'MAXIMILIAN', kind: 'maximilian', inGameScale: 4.8, inGameSpacingMult: 1.5, galleryScale: 3.6, slices: () => [...models.maximilian.body, ...models.maximilian.blades] },
     {
       label: 'RECOGNISER (2-LEG)',
+      kind: 'recogniser',
+      inGameScale: 5.0,
+      inGameSpacingMult: 1.6,
+      galleryScale: 3.8,
       slices: () => [
         ...combineRecogniserLegs(models.recogniser.legs[0], models.recogniser.legs[1]),
         ...models.recogniser.head,
       ],
     },
-    { label: 'EVIL OTTO', slices: () => models.evilOtto.classic },
-    { label: 'ABB // TANK-MECH', slices: () => models.abb },
-    { label: 'SKULLHEAD', slices: () => [...models.skullhead.body, ...models.skullhead.halo] },
-    { label: 'TECH HIVE', slices: () => models.bugHive.hive },
-    { label: 'FLYING BUG BOT', slices: () => models.bugHive.bugBot },
-    { label: 'BRAINBOT', slices: () => models.brainbot },
+    { label: 'EVIL OTTO', kind: 'evil_otto', inGameScale: 4.5, inGameSpacingMult: 1.5, galleryScale: 3.8, slices: () => models.evilOtto.classic },
+    { label: 'ABB // TANK-MECH', kind: 'abb', inGameScale: 4.8, inGameSpacingMult: 1.5, galleryScale: 3.6, slices: () => models.abb },
+    { label: 'SKULLHEAD', kind: 'skullhead', inGameScale: 4.8, inGameSpacingMult: 1.5, galleryScale: 3.6, slices: () => [...models.skullhead.body, ...models.skullhead.halo] },
+    { label: 'TECH HIVE', kind: 'bug_hive', inGameScale: 4.8, inGameSpacingMult: 1.5, galleryScale: 3.6, slices: () => models.bugHive.hive },
+    { label: 'FLYING BUG BOT', kind: 'bug_hive', inGameScale: 2.2, inGameSpacingMult: 1.0, galleryScale: 3.6, slices: () => models.bugHive.bugBot },
+    { label: 'BRAINBOT', kind: 'brainbot', inGameScale: 4.8, inGameSpacingMult: 1.5, galleryScale: 3.6, slices: () => models.brainbot },
     {
       label: 'POWER-UPS',
+      kind: 'crate',
+      inGameScale: 2.0,
+      inGameSpacingMult: 1.0,
+      galleryScale: 3.6,
       slices: () => [
         ...models.orbitals.shooter_drone,
         ...models.orbitals.lightsaber,
         ...models.orbitals.ablative_shield,
       ],
     },
-    { label: '3D WALL', slices: syntheticWallSlices },
+    { label: '3D WALL', kind: 'wall', inGameScale: 2.0, inGameSpacingMult: 1.0, galleryScale: 3.6, slices: syntheticWallSlices },
   ];
 }
 
@@ -246,7 +282,16 @@ export function createModelGallery(
     'display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;width:100%;max-width:1180px;';
   overlay.appendChild(grid);
 
-  const canvases: Array<{ ctx: CanvasRenderingContext2D; slices: HTMLCanvasElement[]; w: number; h: number }> = [];
+  const canvases: Array<{
+    ctx: CanvasRenderingContext2D;
+    slices: HTMLCanvasElement[];
+    w: number;
+    h: number;
+    kind: string;
+    inGameScale: number;
+    inGameSpacingMult: number;
+    galleryScale: number;
+  }> = [];
   for (const entry of list) {
     const card = document.createElement('div');
     card.style.cssText =
@@ -264,7 +309,16 @@ export function createModelGallery(
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.imageSmoothingEnabled = false;
-      canvases.push({ ctx, slices: entry.slices(), w: canvas.width, h: canvas.height });
+      canvases.push({
+        ctx,
+        slices: entry.slices(),
+        w: canvas.width,
+        h: canvas.height,
+        kind: entry.kind,
+        inGameScale: entry.inGameScale,
+        inGameSpacingMult: entry.inGameSpacingMult,
+        galleryScale: entry.galleryScale,
+      });
     }
   }
 
@@ -293,16 +347,23 @@ export function createModelGallery(
       item.ctx.clearRect(0, 0, item.w, item.h);
       item.ctx.fillStyle = '#050a12';
       item.ctx.fillRect(0, 0, item.w, item.h);
+      const cardSpacing = computeGalleryCardSpacing(
+        controlState.spacingPx,
+        item.kind,
+        item.inGameScale,
+        item.inGameSpacingMult,
+        item.galleryScale,
+      );
       drawStack(
         item.ctx,
         item.slices,
         item.w / 2,
-        item.h * 0.78,
+        item.h * 0.80,
         controlState.angleDeg,
         0,
-        4.5,
+        item.galleryScale,
         0,
-        controlState.spacingPx,
+        cardSpacing,
         0,
         0,
         controlState.pitchY,

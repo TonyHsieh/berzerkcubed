@@ -16,18 +16,45 @@ function setInlineBootProgress(fraction: number, label: string): void {
 }
 
 async function boot(): Promise<void> {
-  // Stages 0% -> 25%: engine & audio modules load over the network.
-  setInlineBootProgress(0.02, 'LOADING ENGINE MODULES...');
+  // Stages 0% -> 55%: track each dynamic module import individually + gentle
+  // asymptotic creep so the thermometer climbs smoothly during Vite ESM loading
+  // instead of stalling at 2% and snapping to 100%.
+  let bootProgress = 0.04;
+  let bootTarget = 0.14;
+  let bootLabel = 'LOADING ENGINE MODULES...';
+  setInlineBootProgress(bootProgress, bootLabel);
+
+  const creepTimer = window.setInterval(() => {
+    if (bootProgress < bootTarget - 0.005) {
+      bootProgress += (bootTarget - bootProgress) * 0.18;
+      setInlineBootProgress(bootProgress, bootLabel);
+    }
+  }, 60);
+
+  let loadedCount = 0;
+  const totalImports = 6;
+  const trackImport = <T>(p: Promise<T>, label: string): Promise<T> =>
+    p.then((mod) => {
+      loadedCount += 1;
+      const frac = 0.06 + (loadedCount / totalImports) * 0.48;
+      bootProgress = Math.max(bootProgress, frac);
+      bootTarget = Math.min(0.55, frac + 0.08);
+      bootLabel = label;
+      setInlineBootProgress(bootProgress, bootLabel);
+      return mod;
+    });
+
   const [loadingMod, difficultyMod, inputMod, gameStateMod, hudMod, rendererMod] =
     await Promise.all([
-      import('./game/loading'),
-      import('./config/difficulty'),
-      import('./engine/input'),
-      import('./game/gameState'),
-      import('./game/hud'),
-      import('./game/renderer'),
+      trackImport(import('./game/loading'), 'LOADING BOOTSTRAP PIPELINE...'),
+      trackImport(import('./config/difficulty'), 'LOADING DIFFICULTY & SECTOR DATA...'),
+      trackImport(import('./engine/input'), 'LOADING INPUT & GAMEPAD ENGINE...'),
+      trackImport(import('./game/gameState'), 'LOADING SIMULATION & BOSS AI...'),
+      trackImport(import('./game/hud'), 'LOADING TACTICAL HUD...'),
+      trackImport(import('./game/renderer'), 'LOADING 3D STACK RENDERER & AUDIO...'),
     ]);
-  setInlineBootProgress(0.25, 'ENGINE MODULES READY');
+  window.clearInterval(creepTimer);
+  setInlineBootProgress(0.55, 'ENGINE MODULES READY');
 
   if (!canvas) {
     setInlineBootProgress(1, 'READY');
@@ -42,12 +69,12 @@ async function boot(): Promise<void> {
   // createLoadingScreen() reuses the inline #loading-screen from index.html.
   const loading = loadingMod.createLoadingScreen();
   const { models, cache } = await loadingMod.bootstrapAssets((fraction, label) => {
-    // Stages 25% -> 92% map onto the real voxel-bake / cache-bake work.
-    loading.setProgress(0.25 + fraction * 0.67, label);
+    // Stages 55% -> 96% map onto the real voxel-bake / cache-bake work.
+    loading.setProgress(0.55 + fraction * 0.41, label);
   });
 
-  // Stages 92% -> 100%: circuit grid + HUD initialize, then smooth fade-out.
-  setInlineBootProgress(0.96, 'INITIALIZING CIRCUIT GRID & HUD');
+  // Stages 96% -> 100%: circuit grid + HUD initialize, then smooth fade-out.
+  loading.setProgress(0.98, 'INITIALIZING CIRCUIT GRID & HUD');
   loading.finish();
 
   const galleryMode = new URLSearchParams(window.location.search).get('gallery') === '1';

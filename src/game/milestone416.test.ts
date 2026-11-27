@@ -47,10 +47,12 @@ import {
 } from '../render/spriteStack';
 import { fakeCanvasFactory } from '../render/testCanvas';
 import {
+  GALLERY_DEFAULT_SPACING,
   GALLERY_MAX_SPACING,
   GALLERY_MIN_SPACING,
   applyGalleryKeyPress,
   clampGallerySpacing,
+  computeGalleryCardSpacing,
   createGalleryControlState,
   formatGalleryTelemetry,
   stepGalleryControls,
@@ -116,6 +118,52 @@ describe('M4.16 — Feature 1: Boss music proportional tempo ramp', () => {
     s.setBossHpRatio(0.2);
     s.fadeInLevelMusic();
     expect(s.getBossTempoBpm()).toBeCloseTo(BOSS_BASE_BPM, 3);
+  });
+
+  it('throttles and deduplicates Tone Transport.bpm.rampTo calls during 60Hz boss ticks', () => {
+    const s = new SoundEngine();
+    const rampCalls: Array<{ bpm: number; dur: number }> = [];
+    let fakeNow = 10.0;
+    const fakeTone = {
+      now: () => fakeNow,
+      getTransport: () => ({
+        start: () => undefined,
+        bpm: {
+          value: 118,
+          rampTo: (bpm: number, dur: number) => {
+            rampCalls.push({ bpm, dur });
+          },
+        },
+      }),
+    };
+    const fakeGain = () => ({ gain: { rampTo: () => undefined, value: 0 } });
+    (s as unknown as Record<string, unknown>).Tone = fakeTone;
+    (s as unknown as Record<string, unknown>).musicRig = {
+      masterGain: fakeGain(),
+      levelGain: fakeGain(),
+      bossGain: fakeGain(),
+      levelSeqs: [],
+      bossSeqs: [],
+      started: true,
+    };
+
+    s.crossfadeToBossMusic(1.0);
+    expect(rampCalls).toHaveLength(1);
+
+    // 180 ticks (3s) with unchanged HP should schedule 0 additional ramps
+    for (let i = 0; i < 180; i++) {
+      fakeNow += 1 / 60;
+      s.setBossHpRatio(1.0);
+    }
+    expect(rampCalls).toHaveLength(1);
+
+    // Rapid 60Hz HP drain over 1 second (60 calls) should only schedule ~4 non-overlapping ramps
+    for (let i = 1; i <= 60; i++) {
+      fakeNow += 1 / 60;
+      s.setBossHpRatio(1.0 - i / 60);
+    }
+    expect(rampCalls.length).toBeGreaterThanOrEqual(2);
+    expect(rampCalls.length).toBeLessThanOrEqual(6);
   });
 });
 
@@ -462,5 +510,18 @@ describe('M4.16 — Feature 8: Interactive Model Gallery controls', () => {
     const spinStart = g.angleDeg;
     g = stepGalleryControls(g, new Set(), 0.25);
     expect(g.angleDeg).toBeGreaterThan(spinStart);
+  });
+
+  it('matches in-game spacing-to-scale proportions in the model gallery by default', () => {
+    expect(GALLERY_DEFAULT_SPACING).toBe(2.8);
+    // Hero in-game: scale 2.0, spacing 2.8 * 1.42
+    const heroCardSpacing = computeGalleryCardSpacing(2.8, 'hero', 2.0, 1.0, 3.2);
+    expect(heroCardSpacing / 3.2).toBeCloseTo((2.8 * CHARACTER_HEIGHT_MULTIPLIER) / 2.0, 4);
+    // Boss (e.g. Skullhead) in-game: scale 4.8, spacing 2.8 * 1.42 * 1.5
+    const bossCardSpacing = computeGalleryCardSpacing(2.8, 'skullhead', 4.8, 1.5, 3.6);
+    expect(bossCardSpacing / 3.6).toBeCloseTo((2.8 * CHARACTER_HEIGHT_MULTIPLIER * 1.5) / 4.8, 4);
+    // Recogniser in-game: scale 5.0, spacing 2.8 * 1.0 * 1.6
+    const recCardSpacing = computeGalleryCardSpacing(2.8, 'recogniser', 5.0, 1.6, 3.8);
+    expect(recCardSpacing / 3.8).toBeCloseTo((2.8 * RECOGNISER_HEIGHT_MULTIPLIER * 1.6) / 5.0, 4);
   });
 });
